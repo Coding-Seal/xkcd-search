@@ -65,7 +65,7 @@ func (f *Fetcher) Comic(ctx context.Context, id int) (*Comic, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, ErrNotFound
+			return nil, errNotFound
 		}
 
 		return nil, errors.New(http.StatusText(resp.StatusCode))
