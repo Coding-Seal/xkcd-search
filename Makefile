@@ -37,7 +37,7 @@ test:
 e2e: build
 	@echo Running e2e tests...
 	@build/${BINARY_NAME} -p=${PORT} 2>&1 1>/dev/null &
-	@sleep 5s;
+	@sleep 10s;
 	@python3 test/e2e/update.py ${PORT};
 	@python3 test/e2e/pics.py ${PORT};
 	@kill $$(lsof -t -i:${PORT})
