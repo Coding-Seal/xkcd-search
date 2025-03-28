@@ -1,6 +1,5 @@
-# yadro-go-course
-Course from Yadro on microservices with Go
-![video](example.GIF)
+# xkcd-search
+![video](assets/example.GIF)
 ## Пользователи
 Есть три пользователя:
 * login: admin password: admin
@@ -18,7 +17,14 @@ curl -v -H "Authorization: <token>" -X POST http://localhost:8080/api/update
 ```
 ## API
 Все эндпоинты для работы с REST API имеют префикс /api
-Специально для 9 задания
 
 ## Test Coverage
-![Cover.svg](test/out/cover.svg)
+![Cover.svg](assets/cover.svg)
+
+## Arch
+
+### System Level
+![System](assets/System.png)
+
+### Container Level
+![Container](assets/Container.png)
