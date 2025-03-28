@@ -1,0 +1,100 @@
+openapi: 3.0.4
+info:
+  version: "0.10.0"
+  title: XKCD - search
+tags:
+  - name: auth
+    description: Every endpoint about auth
+  - name: pics
+    description: Search for the comics
+  - name: update
+    description: Update index (requires auth)
+paths:
+  /login:
+    post:
+      tags:
+        - auth
+      summary: Login as a user
+      requestBody:
+        description: Create a new pet in the store
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Cred'
+      responses:
+        '200':
+          description: Successful operation
+          headers:
+            Authorization:
+              description: Header with auth jwt token 
+              schema:
+                type: string
+        '400':
+          description: Invalid input
+        default:
+          description: Unexpected error
+  /update:
+    post:
+      tags:
+        - update
+      summary: update index
+      parameters:
+        - name: Authorization      
+          in: header               
+          required: true          
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful operation
+        '400':
+          description: Invalid input
+        default:
+          description: Unexpected error
+  /pics:
+    post:
+      tags:
+        - update
+      summary: update index
+      parameters:
+        - name: search
+          in: query
+          required: true          
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - "https://xkcd.com/3067/" 
+                  - "https://xkcd.com/3065/"
+        '404':
+          description: No comics found 
+        default:
+          description: Unexpected error
+components:
+  schemas:
+    Cred:
+      x-swagger-router-model: io.swagger.search.model.Cred
+      required:
+        - login
+        - password
+      type: object
+      properties:
+        login:
+          type: string
+          example: bob
+        password:
+          type: string
+          example: my_secret_password
+      xml:
+        name: pet
+    Token:
+      x-swagger-router-model: io.swagger.search.model.token
+      type: string
