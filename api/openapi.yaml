@@ -52,7 +52,7 @@ paths:
         default:
           description: Unexpected error
   /pics:
-    post:
+    get:
       tags:
         - update
       summary: update index
