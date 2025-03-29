@@ -1,0 +1,104 @@
+name: Main actions workflow
+
+on:
+  push:
+  pull_request:
+
+env:
+  TZ: "Europe/Moscow"
+  GOMODCACHE: "/go/pkg/mod"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache packages
+        id: cache-prepare
+        uses: actions/cache@v4
+        with:
+          key: cache-prepare
+          path: |
+            /var/cache/apk/
+            ${{ env.GOMODCACHE }}
+            bin
+      - name: Install dependencies
+        if: steps.cache-prepare.outputs.cache-hit != 'true'
+        run: |
+          sudo mkdir -p ${{ env.GOMODCACHE }}
+          sudo chmod -R 777 ${{ env.GOMODCACHE }}
+          sudo apt install -y make build-essential
+          make download
+          wget -O- -nv https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s v1.64.6
+          export PATH=$PATH:bin
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create go pkg dir
+        run: |
+          sudo mkdir -p ${{ env.GOMODCACHE }}
+          sudo chmod -R 777 ${{ env.GOMODCACHE }}
+      - name: Restore cache
+        uses: actions/cache/restore@v4
+        with:
+          key: cache-prepare
+          path: |
+            /var/cache/apk/
+            ${{ env.GOMODCACHE }}
+            bin
+      - name: Build api
+        run: |
+          pwd
+          ls -la
+          which make
+          make build
+      - name: Build web
+        run: make web      
+
+      - name: Unit test
+        run: |
+          mkdir -p test/out
+          make test
+      - name: Lint test
+        run: |
+          export PATH=$PATH:bin
+          make lint
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xkcd
+          path: |
+            ./build/xkcd
+            ./build/web-server
+            ./test/out/cover.out
+
+  dockerize:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs:
+      - build-and-test
+    env:
+      SERVICE_VERSION: ${{ github.ref_name }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build api image
+        run: docker build -t https://ghcr.io/coding-seal/xkcd-search-api:${{ env.SERVICE_VERSION }} -f Dockerfile.api .
+      - name: Build web image
+        run: docker build -t https://ghcr.io/coding-seal/xkcd-search-web:${{ env.SERVICE_VERSION }} -f Dockerfile.web .
+      - name: Push images
+        run: |
+          docker push https://ghcr.io/coding-seal/xkcd-search-api:${{ env.SERVICE_VERSION }}
+          docker push https://ghcr.io/coding-seal/xkcd-search-web:${{ env.SERVICE_VERSION }}
