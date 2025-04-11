@@ -9,7 +9,7 @@ import (
 )
 
 func TestApi(t *testing.T) {
-	Api(nil, nil, nil, &config.Config{
+	Api(nil, nil, nil, nil, &config.Config{
 		Server: config.Server{
 			RateLimit:        1,
 			ConcurrencyLimit: 1,

@@ -16,17 +16,25 @@ func parse(file string) *template.Template {
 }
 
 var (
-	pics   = parse("comics.html")
-	login  = parse("login.html")
-	update = parse("update.html")
-	main   = parse("main.html")
+	pics     = parse("comics.html")
+	login    = parse("login.html")
+	update   = parse("update.html")
+	favorite = parse("favorites.html")
+	main     = parse("main.html")
 )
 
 type Layout struct {
 	PageTitle string
 }
+type Comic struct {
+	ID       int
+	Title    string
+	ImgURL   string
+	Favorite bool
+}
+
 type PicsParams struct {
-	Urls []string
+	Comics []Comic
 	Layout
 }
 type LoginParams struct {
@@ -36,6 +44,11 @@ type UpdateParams struct {
 	Layout
 }
 type MainParams struct {
+	Layout
+}
+
+type FavoritesParams struct {
+	Comics []Comic
 	Layout
 }
 
@@ -51,6 +64,9 @@ func Update(w http.ResponseWriter, params UpdateParams) error {
 	return update.Execute(w, params)
 }
 
+func Favorites(w http.ResponseWriter, params FavoritesParams) error {
+	return favorite.Execute(w, params)
+}
 func Main(w http.ResponseWriter, params MainParams) error {
 	return main.Execute(w, params)
 }

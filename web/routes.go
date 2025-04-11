@@ -23,6 +23,8 @@ func Routes(client *rest.Client) http.Handler {
 	mux.Handle("POST /loginform", st(httputil.WrapHandler(handlers.LoginForm(client))))
 	mux.Handle("GET /login", st(httputil.WrapHandler(handlers.Login())))
 	mux.Handle("GET /comics", st(httputil.WrapHandler(handlers.Pics(client))))
+	mux.Handle("GET /favorites", st(httputil.WrapHandler(handlers.Favorites(client))))
+	mux.Handle("POST /comic/{id}/favorite", st(httputil.WrapHandler(handlers.ToggleFavorites())))
 	mux.Handle("GET /", st(httputil.WrapHandler(handlers.MainHandler())))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 

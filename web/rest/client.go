@@ -56,7 +56,13 @@ func (c *Client) Login(ctx context.Context, login, pswd string) (string, error) 
 	return token, nil
 }
 
-func (c *Client) SearchPics(ctx context.Context, query string) ([]string, error) {
+type Comic struct {
+	ID     int    `json:"id"`
+	Title  string `json:"title"`
+	ImgURL string `json:"img"`
+}
+
+func (c *Client) SearchPics(ctx context.Context, query string) ([]Comic, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/pics", nil)
 	if err != nil {
 		return nil, errors.Join(err, ErrInternal)
@@ -79,14 +85,13 @@ func (c *Client) SearchPics(ctx context.Context, query string) ([]string, error)
 
 	decoder := json.NewDecoder(resp.Body)
 
-	var pics []string
-
-	err = decoder.Decode(&pics)
+	var comics []Comic
+	err = decoder.Decode(&comics)
 	if err != nil {
 		return nil, errors.Join(err, ErrInternal)
 	}
 
-	return pics, nil
+	return comics, nil
 }
 
 func (c *Client) Update(ctx context.Context, token string) error {
@@ -107,4 +112,26 @@ func (c *Client) Update(ctx context.Context, token string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) Comic(ctx context.Context, id int) (Comic, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf(c.baseURL+"/api/comic/%d", id), nil)
+	if err != nil {
+		return Comic{}, errors.Join(err, ErrInternal)
+	}
+
+	resp, err := c.c.Do(req)
+	if err != nil {
+		return Comic{}, errors.Join(err, ErrInternal)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return Comic{}, fmt.Errorf("%w %s", ErrInternal, http.StatusText(resp.StatusCode))
+	}
+
+	comic := Comic{}
+
+	err = json.NewDecoder(resp.Body).Decode(&comic)
+
+	return comic, err
 }

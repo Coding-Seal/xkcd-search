@@ -1,6 +1,5 @@
 {{ define "content" }}
 
-{{ template "search" . }}
 {{ template "comic-grid" . }}
 <div id="myModal" class="modal">
     <span class="close" onclick="closeModal()">&times;</span>
@@ -50,14 +49,6 @@
 </script>
 {{ end }}
 
-{{ define "search"}}
-<div class="search-container">
-    <form action="/comics" method="get">
-        <input type="text" name="query" placeholder="Search..." required>
-        <button type="submit">Search</button>
-    </form>
-</div>
-{{ end }}
 
 {{ define "comic-grid" }}
 <div class="comic-card-grid">

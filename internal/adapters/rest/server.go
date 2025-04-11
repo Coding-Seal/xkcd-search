@@ -105,7 +105,7 @@ func (s *Server) SetupServer(cfg *config.Config, ctx context.Context) error {
 
 func (s *Server) SetupRoutes(cfg *config.Config, ctx context.Context) {
 	mux := http.NewServeMux()
-	mux.Handle("/api/", http.StripPrefix("/api", Api(s.FetcherSrv, s.SearchSrv, s.UserSrv, cfg, ctx)))
+	mux.Handle("/api/", http.StripPrefix("/api", Api(s.FetcherSrv, s.SearchSrv, s.UserSrv, s.ComicSrv, cfg, ctx)))
 	s.Srv.Handler = mux
 }
 

@@ -23,7 +23,7 @@ func NewFetcher(source string, concurrencyLimit int) *Fetcher {
 	return &Fetcher{
 		client: &http.Client{
 			Transport: http.DefaultTransport,
-			Timeout:   time.Second * 7,
+			Timeout:   time.Second * 15,
 		},
 		source:           source,
 		concurrencyLimit: concurrencyLimit,

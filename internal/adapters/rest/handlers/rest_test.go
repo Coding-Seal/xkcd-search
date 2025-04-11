@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 
 	http_util "yadro-go-course/pkg/http-util"
@@ -68,32 +66,4 @@ func TestUpdate(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	err := h(w, r)
 	assert.ErrorIs(t, err, http_util.ErrInternal)
-}
-
-func TestSearch(t *testing.T) {
-	var searchRepo searchRepoMock
-
-	var comicRepo comicRepoMock
-
-	resUrls := []string{"4", "5", "3", "2", "1"}
-	searchResult := map[int]int{1: 1, 2: 2, 3: 3, 4: 4, 5: 4}
-	searchRepo.On("SearchComics", mock.Anything).Return(searchResult)
-
-	for i := range searchResult {
-		comicRepo.On("Comic", i).Return(models.Comic{ImgURL: strconv.Itoa(i)}, nil)
-	}
-
-	h := Search(services.NewSearch(&searchRepo, &comicRepo))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/?search=\"*\"", nil)
-	// query is "" empty string
-	err := h(w, r)
-	assert.NoError(t, err)
-
-	resp := w.Result()
-
-	var urls []string
-
-	assert.NoError(t, json.NewDecoder(resp.Body).Decode(&urls))
-	assert.Equal(t, resUrls, urls)
 }

@@ -38,7 +38,7 @@ body {
 .modal {
     display: none;
     position: fixed;
-    z-index: 1;
+    z-index: 100;
     left: 0;
     top: 0;
     width: 100%;
@@ -157,4 +157,66 @@ body {
     border: none;
 }
 
+/* Comic card container */
+.comic-card {
+    position: relative;
+    overflow: visible; /* Ensure star isn't clipped */
+}
 
+/* Star button - guaranteed visibility */
+.favorite-star {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* SVG styling */
+.favorite-star svg {
+    width: 20px;
+    height: 20px;
+    pointer-events: none; /* Prevent SVG from blocking clicks */
+}
+
+/* Star states */
+.star-outline {
+    color: #cccccc; /* Light gray */
+    opacity: 1;
+    transition: opacity 0.2s;
+}
+
+.star-filled {
+    color: gold;
+    opacity: 0;
+    position: absolute;
+    transition: opacity 0.2s;
+}
+
+.favorite-star.active .star-outline {
+    opacity: 0;
+}
+
+.favorite-star.active .star-filled {
+    opacity: 1;
+}
+
+/* Hover effects */
+.favorite-star:hover {
+    transform: scale(1.1);
+}
+
+.favorite-star:active {
+    transform: scale(0.95);
+}
