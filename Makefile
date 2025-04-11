@@ -31,7 +31,6 @@ bench:
 .PHONY: test
 test:
 	@echo Running tests ...
-	mkdir build
 	@go test -race -coverprofile build/cover.out ./...
 	# @go tool cover -html=test/out/cover.out
 .PHONY: e2e
