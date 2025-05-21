@@ -1,5 +1,9 @@
 # xkcd-search
 ![video](example.GIF)
+## Запуск 
+```
+docker compose up -d
+```
 ## Пользователи
 Есть три пользователя:
 * login: admin password: admin
