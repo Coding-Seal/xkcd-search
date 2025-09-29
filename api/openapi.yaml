@@ -1,100 +1,126 @@
-openapi: 3.0.4
+openapi: 3.0.3
 info:
-  version: "0.10.0"
-  title: XKCD - search
-tags:
-  - name: auth
-    description: Every endpoint about auth
-  - name: pics
-    description: Search for the comics
-  - name: update
-    description: Update index (requires auth)
+  title: Comics API
+  version: 1.0.0
+  description: API для работы с комиксами, авторизацией и обновлением данных.
+
+servers:
+  - url: https://api.example.com/api
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Credentials:
+      type: object
+      required:
+        - login
+        - password
+      properties:
+        login:
+          type: string
+          example: user123
+        password:
+          type: string
+          format: password
+          example: secret
+
+    OutputComic:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 101
+        title:
+          type: string
+          example: "Amazing Comic"
+        img:
+          type: string
+          format: uri
+          example: "https://example.com/images/101.png"
+
 paths:
   /login:
     post:
-      tags:
-        - auth
-      summary: Login as a user
+      summary: Авторизация пользователя и получение JWT токена
       requestBody:
-        description: Create a new pet in the store
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Cred'
+              $ref: '#/components/schemas/Credentials'
       responses:
         '200':
-          description: Successful operation
+          description: Успешная авторизация, токен возвращается в заголовке Authorization
           headers:
             Authorization:
-              description: Header with auth jwt token 
+              description: JWT токен авторизации
               schema:
                 type: string
         '400':
-          description: Invalid input
-        default:
-          description: Unexpected error
-  /update:
-    post:
-      tags:
-        - update
-      summary: update index
-      parameters:
-        - name: Authorization      
-          in: header               
-          required: true          
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Successful operation
-        '400':
-          description: Invalid input
-        default:
-          description: Unexpected error
+          description: Неверный формат данных или отсутствуют login/password
+        '403':
+          description: Неверный пароль
+        '404':
+          description: Пользователь не найден
+
   /pics:
     get:
-      tags:
-        - update
-      summary: update index
+      summary: Поиск комиксов по названию
       parameters:
         - name: search
           in: query
-          required: true          
+          description: Поисковая фраза
           schema:
             type: string
+          required: false
       responses:
         '200':
-          description: Successful operation
+          description: Список комиксов, соответствующих запросу (максимум 10)
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: string
-                example:
-                  - "https://xkcd.com/3067/" 
-                  - "https://xkcd.com/3065/"
+                  $ref: '#/components/schemas/OutputComic'
         '404':
-          description: No comics found 
-        default:
-          description: Unexpected error
-components:
-  schemas:
-    Cred:
-      x-swagger-router-model: io.swagger.search.model.Cred
-      required:
-        - login
-        - password
-      type: object
-      properties:
-        login:
-          type: string
-          example: bob
-        password:
-          type: string
-          example: my_secret_password
-      xml:
-        name: pet
-    Token:
-      x-swagger-router-model: io.swagger.search.model.token
-      type: string
+          description: Комиксы не найдены
+
+  /update:
+    post:
+      summary: Обновление данных комиксов (требует авторизации)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Успешное обновление данных
+        '401':
+          description: Отсутствует или неверный токен авторизации
+        '403':
+          description: Отсутствует необходимые привилегии для вызова
+
+  /comic/{id}:
+    get:
+      summary: Получение информации о конкретном комиксе по ID
+      parameters:
+        - name: id
+          in: path
+          description: Идентификатор комикса
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Информация о комиксе
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputComic'
+        '400':
+          description: Некорректный ID комикса
+        '404':
+          description: Комикс не найден
