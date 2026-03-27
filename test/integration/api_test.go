@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -351,4 +352,143 @@ func TestIntegration_Concurrent_Requests(t *testing.T) {
 		// Each request should return either 200 (found) or 404 (not found)
 		assert.Contains(t, []int{http.StatusOK, http.StatusNotFound}, code)
 	}
+}
+
+// TestIntegration_Comic_Found verifies that GET /comic/{id} returns 200 for an existing comic.
+func TestIntegration_Comic_Found(t *testing.T) {
+	env := setupTestEnv(t)
+
+	ctx := context.Background()
+	comic := models.Comic{ID: 7, Title: "Found Comic", ImgURL: "http://example.com/7.png"}
+	require.NoError(t, env.comicRepo.Store(ctx, comic))
+
+	resp, err := http.Get(env.srv.URL + "/comic/7")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, float64(7), result["id"])
+}
+
+// TestIntegration_Comic_UnknownID verifies that GET /comic/{id} for a non-existing comic returns 500 (handler returns ErrInternal for all repo errors).
+func TestIntegration_Comic_UnknownID(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Get(env.srv.URL + "/comic/99999")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+// TestIntegration_Search_MultipleResults verifies that storing multiple comics and indexing them returns multiple results.
+func TestIntegration_Search_MultipleResults(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	for i, title := range []string{"uniquexyzword story one", "uniquexyzword adventure two", "uniquexyzword tale three"} {
+		c := models.Comic{ID: 100 + i, Title: title, Transcription: title}
+		require.NoError(t, env.comicRepo.Store(ctx, c))
+	}
+	require.NoError(t, env.index.Build(ctx, env.comicRepo))
+
+	resp, err := http.Get(env.srv.URL + "/pics?search=uniquexyzword")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var results []map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&results))
+	assert.GreaterOrEqual(t, len(results), 2, "should return multiple results")
+}
+
+// TestIntegration_Search_Pics_NoParam verifies that GET /pics without any search parameter returns 404.
+func TestIntegration_Search_Pics_NoParam(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Get(env.srv.URL + "/pics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// TestIntegration_Auth_GarbageToken verifies that a garbage Authorization header returns 401.
+func TestIntegration_Auth_GarbageToken(t *testing.T) {
+	env := setupTestEnv(t)
+
+	req, err := http.NewRequest(http.MethodPost, env.srv.URL+"/update", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "this-is-garbage-not-a-jwt")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestIntegration_Auth_WrongSignatureJWT verifies that a JWT signed with the wrong key returns 401.
+func TestIntegration_Auth_WrongSignatureJWT(t *testing.T) {
+	env := setupTestEnv(t)
+
+	claims := jwt.MapClaims{
+		"user_id":  1,
+		"is_admin": true,
+		"exp":      time.Now().Add(time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
+	tokenStr, err := token.SignedString([]byte("wrong-secret-key-for-testing"))
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, env.srv.URL+"/update", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", tokenStr)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestIntegration_Update_FetchesComics verifies that POST /update with admin token causes comics to be fetchable.
+func TestIntegration_Update_FetchesComics(t *testing.T) {
+	env := setupTestEnv(t)
+
+	req, err := http.NewRequest(http.MethodPost, env.srv.URL+"/update", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", env.adminToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// After update, comic #1 from the mock XKCD server should be in the DB
+	resp2, err := http.Get(env.srv.URL + "/comic/1")
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+}
+
+// TestIntegration_Search_StopWordsOnly verifies that a query consisting only of filtered words returns 404.
+func TestIntegration_Search_StopWordsOnly(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// "about", "above", "after" are stop words — stemmer filters them → empty search → 404
+	resp, err := http.Get(env.srv.URL + "/pics?search=about+above+after")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

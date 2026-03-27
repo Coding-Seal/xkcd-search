@@ -79,3 +79,29 @@ func TestWrapHandler_NoError(t *testing.T) {
 	h.ServeHTTP(w, r)
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
+
+func TestWriteJson(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := WriteJson(w, map[string]int{"answer": 42})
+	assert.NoError(t, err)
+	assert.Contains(t, w.Body.String(), "42")
+}
+
+func TestWriteJson_Struct(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+		Val  int    `json:"val"`
+	}
+	w := httptest.NewRecorder()
+	err := WriteJson(w, payload{Name: "test", Val: 7})
+	assert.NoError(t, err)
+	assert.Contains(t, w.Body.String(), "test")
+	assert.Contains(t, w.Body.String(), "7")
+}
+
+func TestWriteJson_Unencodable(t *testing.T) {
+	w := httptest.NewRecorder()
+	// Channels cannot be JSON-encoded, so this triggers the error path
+	err := WriteJson(w, make(chan int))
+	assert.Error(t, err)
+}
