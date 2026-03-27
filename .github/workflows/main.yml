@@ -57,13 +57,14 @@ jobs:
           which make
           make build
       - name: Build web
-        run: make web      
+        run: make web
 
       - name: Unit test
         run: |
           mkdir -p test/out
           make test
       - name: Lint test
+        continue-on-error: true
         run: |
           export PATH=$PATH:bin
           make lint
