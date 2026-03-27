@@ -51,3 +51,10 @@ func TestScanner_Err(t *testing.T) {
 	}
 	assert.NoError(t, sc.Err())
 }
+
+func TestScanner_EmptyReader(t *testing.T) {
+	buf := bytes.NewBufferString("")
+	sc := NewScanner(buf)
+	assert.False(t, sc.Scan(), "empty reader should have no lines")
+	assert.NoError(t, sc.Err())
+}

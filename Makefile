@@ -46,3 +46,15 @@ web:
 	@echo Building...
 	@go mod tidy
 	go build -o build/web-server ./cmd/web
+
+.PHONY: integration
+integration:
+	@echo Running integration tests ...
+	@go test -race -v ./test/integration/...
+
+.PHONY: e2e-playwright
+e2e-playwright:
+	@echo Running E2E tests with Playwright...
+	@pip install -r test/e2e/playwright/requirements.txt
+	@playwright install chromium
+	@BASE_URL=${WEB_URL} python -m pytest test/e2e/playwright/ -v

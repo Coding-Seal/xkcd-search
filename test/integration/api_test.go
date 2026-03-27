@@ -1,0 +1,354 @@
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
+
+	"yadro-go-course/config"
+	"yadro-go-course/db"
+	comicrepo "yadro-go-course/internal/adapters/repos/comic"
+	fetcherrepo "yadro-go-course/internal/adapters/repos/fetcher"
+	searchrepo "yadro-go-course/internal/adapters/repos/search"
+	userrepo "yadro-go-course/internal/adapters/repos/user"
+	"yadro-go-course/internal/adapters/rest"
+	"yadro-go-course/internal/core/models"
+	"yadro-go-course/internal/core/ports"
+	"yadro-go-course/internal/core/services"
+	xkcdmock "yadro-go-course/test/fetcher"
+	"yadro-go-course/pkg/words"
+)
+
+type testEnv struct {
+	srv        *httptest.Server
+	adminToken string
+	userToken  string
+	comicRepo  ports.ComicsRepo
+	index      *searchrepo.Index
+}
+
+func setupTestEnv(t *testing.T) *testEnv {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	cfg := &config.Config{
+		DB: config.DB{
+			Url: dbPath,
+		},
+		Server: config.Server{
+			RateLimit:        100,
+			ConcurrencyLimit: 10,
+			TokenMaxTime:     time.Hour,
+			DeleteEvery:      time.Minute,
+		},
+		Fetcher: config.Fetcher{
+			SourceURL:  "http://localhost",
+			Parallel:   5,
+			UpdateSpec: "@hourly",
+		},
+	}
+
+	conn, err := sql.Open("sqlite3", cfg.DB.Url)
+	require.NoError(t, err, "open sqlite db")
+	t.Cleanup(func() { conn.Close() })
+
+	err = db.MigrateUp(conn, ctx)
+	require.NoError(t, err, "run migrations")
+
+	comicRepo := comicrepo.NewSqliteStore(conn)
+	userRepo := userrepo.NewSqliteRepo(conn)
+
+	mockXKCD := xkcdmock.NewMockXKCD(5)
+	t.Cleanup(mockXKCD.Close)
+
+	fetcherRepo := fetcherrepo.NewFetcher(mockXKCD.URL, cfg.Fetcher.Parallel)
+
+	stemmer := words.NewStemmer(nil)
+	index := searchrepo.NewIndex(stemmer)
+
+	searchSrv := services.NewSearch(index, comicRepo)
+	fetcherSrv := services.NewFetcher(fetcherRepo, comicRepo, index)
+	userSrv := services.NewUserService(userRepo)
+	comicSrv := services.NewComicService(comicRepo)
+
+	// Create admin user
+	adminHash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	require.NoError(t, err, "hash admin password")
+	adminUser := &models.User{
+		Login:    "admin",
+		Password: adminHash,
+		IsAdmin:  true,
+	}
+	err = userRepo.AddUser(ctx, adminUser)
+	require.NoError(t, err, "add admin user")
+
+	// Create regular user
+	userHash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
+	require.NoError(t, err, "hash user password")
+	regularUser := &models.User{
+		Login:    "user",
+		Password: userHash,
+		IsAdmin:  false,
+	}
+	err = userRepo.AddUser(ctx, regularUser)
+	require.NoError(t, err, "add regular user")
+
+	handler := rest.Api(fetcherSrv, searchSrv, userSrv, comicSrv, cfg, ctx)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	// Obtain admin token
+	adminToken := loginAndGetToken(t, srv.URL, "admin", "admin")
+
+	// Obtain regular user token
+	userToken := loginAndGetToken(t, srv.URL, "user", "password")
+
+	return &testEnv{
+		srv:        srv,
+		adminToken: adminToken,
+		userToken:  userToken,
+		comicRepo:  comicRepo,
+		index:      index,
+	}
+}
+
+func loginAndGetToken(t *testing.T, baseURL, login, password string) string {
+	t.Helper()
+
+	body, err := json.Marshal(map[string]string{"login": login, "password": password})
+	require.NoError(t, err)
+
+	resp, err := http.Post(baseURL+"/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, "login should succeed for %s", login)
+
+	token := resp.Header.Get("Authorization")
+	require.NotEmpty(t, token, "token should be present in Authorization header")
+
+	return token
+}
+
+// TestIntegration_Login_Success verifies that valid admin credentials return 200 with a JWT token.
+func TestIntegration_Login_Success(t *testing.T) {
+	env := setupTestEnv(t)
+
+	body, err := json.Marshal(map[string]string{"login": "admin", "password": "admin"})
+	require.NoError(t, err)
+
+	resp, err := http.Post(env.srv.URL+"/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	token := resp.Header.Get("Authorization")
+	assert.NotEmpty(t, token, "Authorization header should contain JWT token")
+}
+
+// TestIntegration_Login_WrongPassword verifies that wrong password returns 403.
+func TestIntegration_Login_WrongPassword(t *testing.T) {
+	env := setupTestEnv(t)
+
+	body, err := json.Marshal(map[string]string{"login": "admin", "password": "wrongpassword"})
+	require.NoError(t, err)
+
+	resp, err := http.Post(env.srv.URL+"/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// TestIntegration_Login_UserNotFound verifies that unknown user returns 404.
+func TestIntegration_Login_UserNotFound(t *testing.T) {
+	env := setupTestEnv(t)
+
+	body, err := json.Marshal(map[string]string{"login": "unknownuser", "password": "somepassword"})
+	require.NoError(t, err)
+
+	resp, err := http.Post(env.srv.URL+"/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// TestIntegration_Login_MissingCredentials verifies that empty login or password returns 400.
+func TestIntegration_Login_MissingCredentials(t *testing.T) {
+	env := setupTestEnv(t)
+
+	testCases := []struct {
+		name  string
+		login string
+		pass  string
+	}{
+		{"empty login", "", "password"},
+		{"empty password", "admin", ""},
+		{"both empty", "", ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"login": tc.login, "password": tc.pass})
+			require.NoError(t, err)
+
+			resp, err := http.Post(env.srv.URL+"/login", "application/json", bytes.NewReader(body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		})
+	}
+}
+
+// TestIntegration_Login_InvalidJSON verifies that malformed JSON returns 400.
+func TestIntegration_Login_InvalidJSON(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Post(env.srv.URL+"/login", "application/json", strings.NewReader("{not valid json"))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// TestIntegration_Search_EmptyQuery verifies that an empty search query returns 404.
+func TestIntegration_Search_EmptyQuery(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Get(env.srv.URL + "/pics?search=")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// TestIntegration_Search_Found verifies that after indexing a comic, searching for it returns 200 with results.
+func TestIntegration_Search_Found(t *testing.T) {
+	env := setupTestEnv(t)
+
+	ctx := context.Background()
+
+	comic := models.Comic{
+		ID:            42,
+		Title:         "testcomicstory",
+		Transcription: "testcomicstory",
+	}
+	require.NoError(t, env.comicRepo.Store(ctx, comic), "store test comic")
+
+	err := env.index.Build(ctx, env.comicRepo)
+	require.NoError(t, err, "build index")
+
+	resp, err := http.Get(env.srv.URL + "/pics?search=testcomicstory")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var results []map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&results)
+	require.NoError(t, err, "decode search results")
+	assert.NotEmpty(t, results, "search should return at least one result")
+}
+
+// TestIntegration_Update_NoToken verifies that POST /update without a token returns 401.
+func TestIntegration_Update_NoToken(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Post(env.srv.URL+"/update", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestIntegration_Update_WithAdminToken verifies that POST /update with an admin token returns 200.
+func TestIntegration_Update_WithAdminToken(t *testing.T) {
+	env := setupTestEnv(t)
+
+	req, err := http.NewRequest(http.MethodPost, env.srv.URL+"/update", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", env.adminToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// TestIntegration_Update_WithNonAdminToken verifies that POST /update with a non-admin token returns 401.
+func TestIntegration_Update_WithNonAdminToken(t *testing.T) {
+	env := setupTestEnv(t)
+
+	req, err := http.NewRequest(http.MethodPost, env.srv.URL+"/update", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", env.userToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestIntegration_Comic_InvalidID verifies that GET /comic/abc returns 400.
+func TestIntegration_Comic_InvalidID(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := http.Get(env.srv.URL + "/comic/abc")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// TestIntegration_Concurrent_Requests verifies that multiple concurrent requests all complete without server crash.
+func TestIntegration_Concurrent_Requests(t *testing.T) {
+	env := setupTestEnv(t)
+
+	const totalRequests = 20
+	var wg sync.WaitGroup
+	statusCodes := make([]int, totalRequests)
+
+	for i := 0; i < totalRequests; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Get(fmt.Sprintf("%s/pics?search=test%d", env.srv.URL, i))
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			statusCodes[i] = resp.StatusCode
+		}()
+	}
+	wg.Wait()
+
+	for _, code := range statusCodes {
+		// Each request should return either 200 (found) or 404 (not found)
+		assert.Contains(t, []int{http.StatusOK, http.StatusNotFound}, code)
+	}
+}

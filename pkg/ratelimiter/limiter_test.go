@@ -21,3 +21,21 @@ func TestPerUser_CleanUp(t *testing.T) {
 	limiter.CleanUp()
 	assert.NotContains(t, limiter.clients, 5)
 }
+
+func TestRateLimiter_AllowFirst(t *testing.T) {
+	lim := NewRateLimiterPerUser[string](5, time.Second)
+	assert.True(t, lim.Allow("user1"), "first request should always be allowed")
+}
+
+func TestRateLimiter_DifferentUsers_Independent(t *testing.T) {
+	lim := NewRateLimiterPerUser[string](1, time.Second)
+	assert.True(t, lim.Allow("alpha"))
+	assert.True(t, lim.Allow("beta"), "different user should have own bucket")
+}
+
+func TestRateLimiter_CleanupDoesNotPanic(t *testing.T) {
+	lim := NewRateLimiterPerUser[int](10, time.Nanosecond)
+	lim.Allow(1)
+	lim.Allow(2)
+	assert.NotPanics(t, func() { lim.CleanUp() })
+}

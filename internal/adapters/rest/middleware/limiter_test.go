@@ -86,3 +86,35 @@ func TestRateLimitOnIP(t *testing.T) {
 	h.ServeHTTP(wSecond, secondReq)
 	assert.Equal(t, http.StatusOK, wSecond.Result().StatusCode)
 }
+
+func TestConcurrencyLimiter_Allowed(t *testing.T) {
+	m := ConcurrencyLimiter(5)
+	h := m(dummyHandler)
+	ctx := contextutil.WithReqID(context.Background(), 1)
+	r := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+func TestConcurrencyLimiter_Exceeded(t *testing.T) {
+	m := ConcurrencyLimiter(0)
+	h := m(dummyHandler)
+	ctx := contextutil.WithReqID(context.Background(), 1)
+	r := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	assert.Equal(t, http.StatusTooManyRequests, w.Result().StatusCode)
+}
+
+func TestConcurrencyLimiter_Sequential(t *testing.T) {
+	m := ConcurrencyLimiter(2)
+	h := m(dummyHandler)
+	ctx := contextutil.WithReqID(context.Background(), 1)
+	r := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	for i := 0; i < 5; i++ {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	}
+}

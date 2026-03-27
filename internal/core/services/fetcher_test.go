@@ -33,3 +33,36 @@ func TestFetcher_Update(t *testing.T) {
 	err := fetcher.Update(context.Background())
 	assert.NoError(t, err)
 }
+
+func TestFetcher_Update_AllAlreadyFetched(t *testing.T) {
+	fetcherRepo := newFetcherRepoMock()
+	comicRepo := newComicRepoMock()
+	searchRepo := newSearchRepoMock()
+
+	fetcherRepo.On("LastComicID").Return(3, nil)
+	comicRepo.On("Comic", 1).Return(models.Comic{ID: 1}, nil)
+	comicRepo.On("Comic", 2).Return(models.Comic{ID: 2}, nil)
+	comicRepo.On("Comic", 3).Return(models.Comic{ID: 3}, nil)
+	fetcherRepo.On("Comics", 0).Return(make(chan int, 0), make(chan models.Comic, 0))
+
+	fetcher := NewFetcher(fetcherRepo, comicRepo, searchRepo)
+	err := fetcher.Update(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestFetcher_Update_StoreError(t *testing.T) {
+	fetcherRepo := newFetcherRepoMock()
+	comicRepo := newComicRepoMock()
+	searchRepo := newSearchRepoMock()
+
+	fetcherRepo.On("LastComicID").Return(2, nil)
+	comicRepo.On("Comic", 1).Return(models.Comic{ID: 1}, nil)
+	comicRepo.On("Comic", 2).Return(models.Comic{}, ports.ErrNotFound)
+	fetcherRepo.On("Comics", 1).Return(make(chan int, 1), make(chan models.Comic, 1))
+	comicRepo.On("Store", mock.Anything).Return(ports.ErrInternal)
+	searchRepo.On("AddComic", mock.Anything)
+
+	fetcher := NewFetcher(fetcherRepo, comicRepo, searchRepo)
+	err := fetcher.Update(context.Background())
+	assert.ErrorIs(t, err, ports.ErrInternal)
+}

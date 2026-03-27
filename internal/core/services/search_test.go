@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"yadro-go-course/internal/core/models"
+	"yadro-go-course/internal/core/ports"
 )
 
 func TestSearch_AddComic(t *testing.T) {
@@ -38,4 +39,40 @@ func TestSearch_SearchComics(t *testing.T) {
 
 	comics := search.SearchComics(context.Background(), "1", 6)
 	assert.Equal(t, expected, comics)
+}
+
+func TestSearch_Empty(t *testing.T) {
+	searchRepo := newSearchRepoMock()
+	comicRepo := newComicRepoMock()
+	search := NewSearch(searchRepo, comicRepo)
+
+	searchRepo.On("SearchComics", "nothing").Return(map[int]int{})
+
+	comics := search.SearchComics(context.Background(), "nothing", 10)
+	assert.Empty(t, comics)
+}
+
+func TestSearch_ZeroLimit(t *testing.T) {
+	searchRepo := newSearchRepoMock()
+	comicRepo := newComicRepoMock()
+	search := NewSearch(searchRepo, comicRepo)
+
+	searchRepo.On("SearchComics", "test").Return(map[int]int{1: 5})
+	comicRepo.On("Comic", 1).Return(models.Comic{ID: 1}, nil)
+
+	comics := search.SearchComics(context.Background(), "test", 0)
+	assert.Empty(t, comics)
+}
+
+func TestSearch_SearchComics_RepoErrors(t *testing.T) {
+	searchRepo := newSearchRepoMock()
+	comicRepo := newComicRepoMock()
+	search := NewSearch(searchRepo, comicRepo)
+
+	searchRepo.On("SearchComics", "broken").Return(map[int]int{1: 9})
+	comicRepo.On("Comic", 1).Return(models.Comic{}, ports.ErrInternal)
+
+	comics := search.SearchComics(context.Background(), "broken", 10)
+	// comic with error is skipped, returns empty
+	assert.Empty(t, comics)
 }
