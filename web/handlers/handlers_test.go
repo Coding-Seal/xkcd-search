@@ -1,3 +1,4 @@
+//nolint:gochecknoinits
 package handlers_test
 
 import (
@@ -19,10 +20,10 @@ import (
 // failWriter simulates a ResponseWriter whose Write method always fails.
 type failWriter struct{ hdr http.Header }
 
-func newFailWriter() *failWriter { return &failWriter{hdr: http.Header{}} }
-func (f *failWriter) Header() http.Header                { return f.hdr }
-func (f *failWriter) Write([]byte) (int, error)          { return 0, fmt.Errorf("forced write error") }
-func (f *failWriter) WriteHeader(int)                    {}
+func newFailWriter() *failWriter                { return &failWriter{hdr: http.Header{}} }
+func (f *failWriter) Header() http.Header       { return f.hdr }
+func (f *failWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("forced write error") }
+func (f *failWriter) WriteHeader(int)           {}
 
 // apiServer creates a mock API server with configurable handlers per path.
 func apiServer(handler http.Handler) *httptest.Server {

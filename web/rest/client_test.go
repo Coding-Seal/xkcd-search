@@ -1,3 +1,4 @@
+//nolint:gochecknoinits
 package rest_test
 
 import (
