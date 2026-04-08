@@ -63,6 +63,22 @@ jobs:
         run: |
           mkdir -p test/out
           make test
+      - name: Integration tests
+        run: make integration
+      - name: E2e tests
+        run: |
+          pip install requests
+          make e2e
+      - name: E2e Playwright tests
+        run: |
+          echo "127.0.0.1 api" | sudo tee -a /etc/hosts
+          build/xkcd &
+          sleep 5
+          build/web-server &
+          sleep 3
+          make e2e-playwright
+        env:
+          WEB_URL: http://localhost:8090
       - name: Lint test
         continue-on-error: true
         run: |
