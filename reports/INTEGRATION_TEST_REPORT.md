@@ -1,0 +1,343 @@
+# Отчёт по интеграционному тестированию
+
+**Проект:** XKCD Comics Aggregator (xs)
+**Дата:** 08.04.2026
+**Команда:** 2 человека
+
+---
+
+## 1. Описание выполненной работы
+
+### 1.1 Объект тестирования
+
+Интеграционное тестирование проверяет взаимодействие нескольких модулей приложения:
+
+- **Модуль аутентификации**: обработчик `POST /login` + `UserService` + `SqliteRepo` + JWT-middleware
+- **Модуль поиска**: обработчик `GET /pics` + `SearchService` + `Index` + `SqliteStore`
+- **Модуль обновления**: обработчик `POST /update` + `FetcherService` + `FetcherRepo` (мок) + `SqliteStore` + JWT-авторизация (admin role)
+- **Модуль комиксов**: обработчик `GET /comic/{id}` + `ComicService` + `SqliteStore`
+- **Модуль конкурентности**: несколько параллельных запросов к реальному HTTP-стеку
+
+### 1.2 Используемые инструменты
+
+| Инструмент | Назначение |
+|------------|------------|
+| `go test` | Фреймворк тестирования |
+| `net/http/httptest.NewServer` | Реальный HTTP-сервер на случайном порту |
+| `net/http` (стандартный клиент) | HTTP-клиент для запросов к тестовому серверу |
+| `database/sql` + SQLite (tmp-файл) | Изолированная тестовая БД в `t.TempDir()` |
+| `xkcdmock.NewMockXKCD` | Мок-сервер XKCD API, возвращающий 5 комиксов |
+| `golang-jwt/jwt` | Прямое создание JWT-токенов для негативных тестов |
+| `golang.org/x/crypto/bcrypt` | Хеширование паролей тестовых пользователей |
+| `testify/assert`, `testify/require` | Проверки и аssertions |
+| GitHub Actions | Сервер непрерывной интеграции |
+
+### 1.3 Применение заглушек (mock)
+
+**Реальные компоненты:** SQLite БД в `t.TempDir()` с полными миграциями, полный HTTP-стек через `httptest.NewServer`, все сервисы (Search, Fetcher, User, Comic), JWT-middleware, rate limiter.
+
+**Мокированные компоненты:** XKCD API (`xkcdmock.NewMockXKCD` — локальный HTTP-сервер, возвращающий предопределённые комиксы).
+
+### 1.4 Классификация тестов
+
+#### По уровню изоляции
+
+Интеграционные тесты обеспечивают **частичную изоляцию**: реальные компоненты (SQLite, HTTP-роутер, все сервисы и репозитории) работают вместе, а внешний XKCD API заменён локальным моком. Если тест падает — проблема во взаимодействии модулей.
+
+#### По подходу к тестированию
+
+| Подход | Описание | Применение |
+|--------|----------|------------|
+| **Серый ящик (gray-box)** | Тестировщик знает архитектуру, проверяет систему через HTTP, контролирует внутреннее состояние (БД, index) | Все 20 сценариев: HTTP-запросы + прямая работа с `comicRepo`/`index` для подготовки данных |
+
+#### По назначению теста
+
+| Назначение | Маркер | Кол-во | Описание |
+|------------|--------|--------|----------|
+| Штатный сценарий | EC (Expected Case) | 9 | Успешный логин, поиск, обновление, получение комикса, конкурентные запросы |
+| Путь ошибки | EP (Error Path) | 10 | Неверный пароль, несуществующий пользователь, отсутствующий токен, мусорный JWT, неверная подпись |
+| Граничное значение | BV (Boundary Value) | 1 | Только stop-words в поисковом запросе → 404 |
+
+#### По объекту тестирования
+
+| Категория | Файл | Тесты | Объект тестирования |
+|-----------|------|-------|---------------------|
+| Аутентификация | `test/integration/api_test.go` | 7 | `POST /login`: корректный вход, неверный пароль, несуществующий пользователь, пустые поля, невалидный JSON, мусорный токен, неверная подпись JWT |
+| Поиск | `test/integration/api_test.go` | 5 | `GET /pics`: пустой запрос, найдено, несколько результатов, нет параметра, только stop-words |
+| Обновление | `test/integration/api_test.go` | 4 | `POST /update`: без токена, admin-токен, non-admin-токен, обновление + поиск комикса |
+| Комиксы | `test/integration/api_test.go` | 3 | `GET /comic/{id}`: некорректный ID, существующий, несуществующий |
+| Конкурентность | `test/integration/api_test.go` | 1 | 20 параллельных поисковых запросов без паник/гонок |
+
+### 1.5 Применённые техники тест-дизайна
+
+#### КЭ — Классы эквивалентности
+
+| Модуль | Входной параметр | Класс | Сценарий | Значение |
+|--------|------------------|-------|----------|----------|
+| login | `password` | Верный | №1 | `"admin"/"admin"` → 200, JWT в `Authorization` |
+| login | `password` | Неверный | №2 | `"admin"/"wrongpassword"` → 403 |
+| login | `login` | Несуществующий | №3 | `"unknownuser"` → 404 |
+| login | `body` | Невалидный JSON | №5 | `{not valid json` → 400 |
+| search | `search` | Есть совпадения | №7 | `"testcomicstory"` → 200, массив |
+| search | `search` | Нет совпадений | №6 | `""` → 404 |
+| search | `search` | Несколько результатов | №13 | `"uniquexyzword"` → ≥2 результата |
+| update | `Authorization` | Admin-токен | №8 | → 200 |
+| update | `Authorization` | Non-admin-токен | №10 | → 401 |
+| update | `Authorization` | Отсутствует | №9 | → 401 |
+| comic | `id` | Валидный, существует | №12 | `/comic/7` → 200, `id=7` |
+| comic | `id` | Несуществующий | №14 | `/comic/99999` → 500 |
+
+#### ГЗ — Граничные значения
+
+| Модуль | Граница | Сценарий | Значение |
+|--------|---------|----------|----------|
+| login | Пустые поля | №4 | `{login:"", password:""}` → 400 |
+| login | Только login пуст | №4 | `{login:"", password:"password"}` → 400 |
+| login | Только password пуст | №4 | `{login:"admin", password:""}` → 400 |
+| search | Только stop-words | №19 | `"about above after"` → 404 |
+| comic | id=0 (некорректный формат) | №11 | `/comic/abc` → 400 |
+
+#### ПО — Путь ошибки
+
+| Ошибка | Сценарий | Что проверяем |
+|--------|----------|---------------|
+| Неверный пароль | №2 | bcrypt-сравнение → 403 |
+| Несуществующий пользователь | №3 | ORM `.UserLogin()` → nil → 404 |
+| Мусорный JWT | №15 | Middleware парсит строку → 401 |
+| JWT с неверной подписью | №16 | JWT signed with wrong key → 401 |
+| non-admin вызывает update | №10 | Middleware проверяет `is_admin` → 401 |
+| Несуществующий комикс | №14 | `ComicService.Comic()` → ошибка → 500 |
+
+#### ПП — Попарное тестирование
+
+| Пара компонентов | Сценарий | Что проверяем |
+|-----------------|----------|---------------|
+| `POST /login` + JWT + `POST /update` | №8 | Полный цикл: логин → токен → авторизованный update |
+| `POST /update` + `FetcherService` + `GET /comic/{id}` | №17 | Update загружает комиксы → они доступны через /comic |
+| `Index.Build()` + `GET /pics` | №7 | Прямая вставка в repo + rebuild index → поиск возвращает результат |
+| 20 горутин + HTTP-стек | №18 | Параллельные запросы → все завершаются с 200 или 404 |
+
+### 1.6 Непрерывная интеграция
+
+```
+make test → make integration → make e2e
+```
+
+Джоб `make integration` запускает `go test -race -v ./test/integration/...`. Каждый тест создаёт изолированную среду через `setupTestEnv(t)` с временной БД в `t.TempDir()` и мок-сервером XKCD.
+
+---
+
+## 2. Тест-план
+
+### 2.1 Перечень сценариев
+
+| № | Сценарий | Тип | Модули |
+|---|----------|-----|--------|
+| 1 | Успешный вход с валидными admin-учётными данными | Позитивный | login, auth, user repo |
+| 2 | Вход с неверным паролем → 403 | Негативный | login, user repo |
+| 3 | Вход с несуществующим логином → 404 | Негативный | login, user repo |
+| 4 | Вход с пустыми полями (3 комбинации) → 400 | Негативный | login, validation |
+| 5 | Вход с невалидным JSON → 400 | Негативный | login, JSON parsing |
+| 6 | Поиск с пустым запросом → 404 | Негативный | search, index |
+| 7 | Поиск по проиндексированному комиксу → 200 | Позитивный | search, index, comic repo |
+| 8 | Обновление с admin-токеном → 200 | Позитивный | update, JWT auth, fetcher |
+| 9 | Обновление без токена → 401 | Негативный | update, JWT middleware |
+| 10 | Обновление с non-admin-токеном → 401 | Негативный | update, JWT middleware |
+| 11 | GET /comic с нечисловым ID → 400 | Негативный | comic handler |
+| 12 | GET /comic с существующим ID → 200 | Позитивный | comic handler, comic repo |
+| 13 | GET /comic с несуществующим ID → 500 | Негативный | comic handler, comic repo |
+| 14 | Поиск возвращает несколько результатов | Позитивный | search, index, comic repo |
+| 15 | /update с мусорным токеном → 401 | Негативный | JWT middleware |
+| 16 | /update с JWT неверной подписи → 401 | Негативный | JWT middleware |
+| 17 | Update → FetchesComics → /comic/{id} → 200 | Позитивный | update, fetcher, comic handler |
+| 18 | 20 параллельных поисковых запросов — без паник | Позитивный | search, concurrency |
+| 19 | Поиск только по stop-words → 404 | Граничный | search, stemmer |
+| 20 | GET /pics без параметра search → 404 | Негативный | search handler |
+
+### 2.2 Описание сценариев
+
+**Сценарий 1: Успешный вход с валидными admin-учётными данными**
+- Предусловия: в БД создан пользователь `admin/admin` (bcrypt), `is_admin=true`
+- Шаги: `POST /login {"login":"admin","password":"admin"}` → 200
+- Ожидаемый результат: HTTP 200, заголовок `Authorization` содержит непустой JWT-токен
+
+**Сценарий 2: Вход с неверным паролем**
+- Предусловия: пользователь `admin` существует
+- Шаги: `POST /login {"login":"admin","password":"wrongpassword"}` → 403
+- Ожидаемый результат: HTTP 403
+
+**Сценарий 3: Вход с несуществующим логином**
+- Предусловия: пользователь с таким логином отсутствует
+- Шаги: `POST /login {"login":"unknownuser","password":"any"}` → 404
+- Ожидаемый результат: HTTP 404
+
+**Сценарий 4: Вход с пустыми полями (попарное тестирование)**
+- Предусловия: нет
+- Шаги: три подтеста — `{""/"password"}`, `{"admin"/""}`, `{"/"}` → 400
+- Ожидаемый результат: HTTP 400 для каждой комбинации
+
+**Сценарий 5: Невалидный JSON**
+- Предусловия: нет
+- Шаги: `POST /login` с телом `{not valid json` → 400
+- Ожидаемый результат: HTTP 400
+
+**Сценарий 6: Поиск с пустым запросом**
+- Предусловия: индекс пуст
+- Шаги: `GET /pics?search=` → 404
+- Ожидаемый результат: HTTP 404
+
+**Сценарий 7: Поиск по проиндексированному комиксу**
+- Предусловия: в БД сохранён комикс с title/transcription = `"testcomicstory"`, индекс перестроен
+- Шаги: `GET /pics?search=testcomicstory` → 200
+- Ожидаемый результат: HTTP 200, непустой JSON-массив
+
+**Сценарий 8: Обновление с admin-токеном**
+- Предусловия: получен admin-токен через `/login`
+- Шаги: `POST /update` с заголовком `Authorization: <token>` → 200
+- Ожидаемый результат: HTTP 200
+
+**Сценарий 9: Обновление без токена**
+- Предусловия: нет
+- Шаги: `POST /update` без заголовка Authorization → 401
+- Ожидаемый результат: HTTP 401
+
+**Сценарий 10: Обновление с non-admin-токеном**
+- Предусловия: получен токен обычного пользователя (`user/password`, `is_admin=false`)
+- Шаги: `POST /update` с non-admin-токеном → 401
+- Ожидаемый результат: HTTP 401
+
+**Сценарий 11: GET /comic с нечисловым ID**
+- Предусловия: нет
+- Шаги: `GET /comic/abc` → 400
+- Ожидаемый результат: HTTP 400
+
+**Сценарий 12: GET /comic с существующим ID**
+- Предусловия: в БД сохранён комикс `{ID:7, Title:"Found Comic"}`
+- Шаги: `GET /comic/7` → 200, тело содержит `"id":7`
+- Ожидаемый результат: HTTP 200, поле `id` = 7
+
+**Сценарий 13: GET /comic с несуществующим ID**
+- Предусловия: комикс с ID=99999 отсутствует
+- Шаги: `GET /comic/99999` → 500
+- Ожидаемый результат: HTTP 500 (сервис возвращает внутреннюю ошибку)
+
+**Сценарий 14: Поиск возвращает несколько результатов**
+- Предусловия: 3 комикса с одинаковым словом `"uniquexyzword"` в title, индекс перестроен
+- Шаги: `GET /pics?search=uniquexyzword` → 200, ≥2 результата
+- Ожидаемый результат: массив с не менее чем 2 элементами
+
+**Сценарий 15: Мусорный JWT-токен**
+- Предусловия: нет
+- Шаги: `POST /update` с `Authorization: this-is-garbage-not-a-jwt` → 401
+- Ожидаемый результат: HTTP 401
+
+**Сценарий 16: JWT с неверной подписью**
+- Предусловия: нет
+- Шаги: `POST /update` с JWT, подписанным случайным секретом → 401
+- Ожидаемый результат: HTTP 401 (подпись не совпадает с секретом сервера)
+
+**Сценарий 17: Обновление загружает комиксы → доступны через /comic**
+- Предусловия: мок XKCD настроен на 5 комиксов (comic #1 всегда доступен)
+- Шаги: `POST /update` (admin) → 200; `GET /comic/1` → 200
+- Ожидаемый результат: после update комикс #1 сохранён в БД и доступен
+
+**Сценарий 18: 20 параллельных запросов**
+- Предусловия: сервер запущен
+- Шаги: 20 горутин одновременно отправляют `GET /pics?search=testN` → все завершаются
+- Ожидаемый результат: каждый запрос возвращает 200 или 404, паник и гонок нет
+
+**Сценарий 19: Поиск только по stop-words**
+- Предусловия: нет
+- Шаги: `GET /pics?search=about+above+after` → 404
+- Ожидаемый результат: HTTP 404 (стеммер убирает все слова → пустой запрос)
+
+**Сценарий 20: GET /pics без параметра search**
+- Предусловия: нет
+- Шаги: `GET /pics` (без query string) → 404
+- Ожидаемый результат: HTTP 404
+
+---
+
+## 3. Результаты тестирования
+
+### 3.1 Общие результаты
+
+| Метрика | Значение |
+|---------|----------|
+| Всего сценариев | 20 |
+| Пройдено | 20 (100%) |
+| Провалено | 0 |
+| Время выполнения | ~2 с |
+| Негативных сценариев | 12 из 20 |
+| Гонок данных (`-race`) | 0 |
+
+### 3.2 Результаты прохождения тестов
+
+| Статус | Тест |
+|--------|------|
+| ✅ | TestIntegration_Login_Success |
+| ✅ | TestIntegration_Login_WrongPassword |
+| ✅ | TestIntegration_Login_UserNotFound |
+| ✅ | TestIntegration_Login_MissingCredentials (3 подтеста) |
+| ✅ | TestIntegration_Login_InvalidJSON |
+| ✅ | TestIntegration_Search_EmptyQuery |
+| ✅ | TestIntegration_Search_Found |
+| ✅ | TestIntegration_Update_NoToken |
+| ✅ | TestIntegration_Update_WithAdminToken |
+| ✅ | TestIntegration_Update_WithNonAdminToken |
+| ✅ | TestIntegration_Comic_InvalidID |
+| ✅ | TestIntegration_Comic_Found |
+| ✅ | TestIntegration_Comic_UnknownID |
+| ✅ | TestIntegration_Search_MultipleResults |
+| ✅ | TestIntegration_Search_Pics_NoParam |
+| ✅ | TestIntegration_Auth_GarbageToken |
+| ✅ | TestIntegration_Auth_WrongSignatureJWT |
+| ✅ | TestIntegration_Update_FetchesComics |
+| ✅ | TestIntegration_Concurrent_Requests |
+| ✅ | TestIntegration_Search_StopWordsOnly |
+
+### 3.3 Результаты на сервере непрерывной интеграции
+
+Тесты запускаются командой `make integration` (`go test -race -v ./test/integration/...`). Каждый тест использует изолированную среду: временную SQLite-БД в `t.TempDir()` и мок-сервер XKCD.
+
+Статус последнего запуска: **20/20 пройдено**, гонок данных: **0**.
+
+---
+
+## 4. Процедура расширения тестового набора
+
+При добавлении нового функционального модуля (например, `GET /stats` — статистика по комиксам):
+
+1. Определить сценарии: позитивный (есть комиксы), негативный (пустая БД), граничный (1 комикс)
+2. Добавить тест в `test/integration/api_test.go` с использованием `setupTestEnv(t)`
+3. Использовать `env.comicRepo.Store(ctx, comic)` для подготовки данных (gray-box)
+4. Описать предусловия, шаги и ожидаемый результат в тест-плане (этот документ)
+5. Добавить негативный сценарий (невалидные параметры, отсутствие прав)
+
+**Пример:**
+
+```go
+func TestIntegration_Stats_Empty(t *testing.T) {
+    env := setupTestEnv(t)
+    resp, err := http.Get(env.srv.URL + "/stats")
+    require.NoError(t, err)
+    defer resp.Body.Close()
+    assert.Equal(t, http.StatusOK, resp.StatusCode)
+    // пустая БД → {"total": 0}
+}
+
+func TestIntegration_Stats_WithComics(t *testing.T) {
+    env := setupTestEnv(t)
+    ctx := context.Background()
+    for i := 1; i <= 3; i++ {
+        require.NoError(t, env.comicRepo.Store(ctx, models.Comic{ID: i}))
+    }
+    resp, err := http.Get(env.srv.URL + "/stats")
+    require.NoError(t, err)
+    defer resp.Body.Close()
+    assert.Equal(t, http.StatusOK, resp.StatusCode)
+    var result map[string]int
+    require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+    assert.Equal(t, 3, result["total"])
+}
+```
