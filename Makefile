@@ -33,6 +33,9 @@ test:
 	@echo Running tests ...
 	@go test -race -coverprofile build/cover.out ./...
 	@go tool cover -html=build/cover.out
+
+.PHONY: test-all
+test-all: test integration e2e
 .PHONY: e2e
 e2e: build
 	@echo Running e2e tests...
