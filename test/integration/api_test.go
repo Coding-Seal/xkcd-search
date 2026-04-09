@@ -589,7 +589,7 @@ func TestIntegration_Search_ReturnsCorrectFields(t *testing.T) {
 
 	first := results[0]
 	assert.Contains(t, first, "id", "result must have 'id' field")
-	assert.Contains(t, first, "url", "result must have 'url' field")
+	assert.Contains(t, first, "img", "result must have 'img' field")
 }
 
 // TestIntegration_Comic_ReturnedFieldsCorrect verifies GET /comic/{id} returns expected JSON fields.
@@ -610,7 +610,7 @@ func TestIntegration_Comic_ReturnedFieldsCorrect(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 
 	assert.Equal(t, float64(500), result["id"])
-	assert.Equal(t, "http://example.com/500.png", result["url"])
+	assert.Equal(t, "http://example.com/500.png", result["img"])
 }
 
 // TestIntegration_Update_Idempotent verifies that calling update twice does not duplicate comics in search results.
