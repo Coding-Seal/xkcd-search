@@ -32,9 +32,32 @@ func TestComicService_Comic_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ports.ErrNotFound)
 }
 
-func TestComicService_Store(t *testing.T) {
+// TestComicService_Store_* — equivalence partitioning:
+//   Class A: valid comic, repo succeeds → no error
+//   Class B: any comic, repo fails     → error propagated
+//   Class C: zero-value comic          → boundary (treated same as class A by service)
+
+func TestComicService_Store_Success(t *testing.T) {
 	repo := newComicRepoMock()
 	comic := models.Comic{ID: 1, Title: "Store Test"}
+	repo.On("Store", comic).Return(nil)
+	svc := NewComicService(repo)
+	err := svc.Store(context.Background(), comic)
+	assert.NoError(t, err)
+}
+
+func TestComicService_Store_RepoError(t *testing.T) {
+	repo := newComicRepoMock()
+	comic := models.Comic{ID: 2, Title: "Fail Comic"}
+	repo.On("Store", comic).Return(ports.ErrNotFound)
+	svc := NewComicService(repo)
+	err := svc.Store(context.Background(), comic)
+	assert.ErrorIs(t, err, ports.ErrNotFound)
+}
+
+func TestComicService_Store_EmptyComic(t *testing.T) {
+	repo := newComicRepoMock()
+	comic := models.Comic{}
 	repo.On("Store", comic).Return(nil)
 	svc := NewComicService(repo)
 	err := svc.Store(context.Background(), comic)
