@@ -1,5 +1,7 @@
 BINARY_NAME=xkcd
 PORT=8090
+WEB_URL=http://localhost:8090
+PYTHON=venv/bin/python3
 
 .PHONY: build
 build:
@@ -41,8 +43,8 @@ e2e: build
 	@echo Running e2e tests...
 	@build/${BINARY_NAME} -p=${PORT} 2>&1 1>/dev/null &
 	@sleep 10s;
-	@python3 test/e2e/update.py ${PORT};
-	@python3 test/e2e/pics.py ${PORT};
+	@${PYTHON} test/e2e/update.py ${PORT};
+	@${PYTHON} test/e2e/pics.py ${PORT};
 	@kill $$(lsof -t -i:${PORT})
 .PHONY: web
 web:
@@ -58,6 +60,6 @@ integration:
 .PHONY: e2e-playwright
 e2e-playwright:
 	@echo Running E2E tests with Playwright...
-	@pip install -r test/e2e/playwright/requirements.txt
-	@playwright install chromium
-	@BASE_URL=${WEB_URL} python -m pytest test/e2e/playwright/ -v
+	@${PYTHON} -m pip install -r test/e2e/playwright/requirements.txt
+	@${PYTHON} -m playwright install chromium
+	@BASE_URL=${WEB_URL} ${PYTHON} -m pytest test/e2e/playwright/ -v

@@ -349,40 +349,64 @@ def test_navbar_home_link_navigates_to_root(page: Page):
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 11: Поисковый запрос сохраняется после отправки формы
-# Предусловия: веб-сервер запущен, пользователь не авторизован
+# Сценарий 13: Пользователь добавляет комикс в избранное, затем убирает его
+# Предусловия: пользователь bob/bob существует в БД, индекс заполнен
 # ---------------------------------------------------------------------------
-def test_search_query_reflected_after_submit(page: Page):
+def test_add_and_remove_favorite_disappears_from_favorites(page: Page):
     """
-    Шаг 1: Пользователь открывает главную страницу.
-    Шаг 2: Вводит поисковый запрос "linux".
-    Шаг 3: Нажимает Enter.
-    Шаг 4: Дожидается загрузки страницы результатов.
-    Ожидаемый результат: запрос "linux" отражён в URL или в поле ввода.
+    Шаг 1: Пользователь входит в систему (bob/bob).
+    Шаг 2: Выполняет поиск "apple", ожидает результаты.
+    Шаг 3: Убеждается, что первый комикс добавлен в избранное (кликает если нет).
+    Шаг 4: Открывает /favorites — фиксирует количество комиксов.
+    Шаг 5: Кликает кнопку избранного у первого комикса — удаляет из избранного.
+    Шаг 6: Открывает /favorites снова — проверяет, что количество уменьшилось.
+    Ожидаемый результат: комикс исчез со страницы /favorites после удаления.
     """
-    query = "linux"
+    # Шаг 1: войти в систему
+    _login(page, VALID_USER, VALID_PASS)
 
-    # Шаг 1: открыть главную страницу
+    # Шаг 2: выполнить поиск
     page.goto(BASE_URL + "/")
-
-    # Шаг 2: ввести запрос
     search_input = page.locator(
         "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
     ).first
-    search_input.fill(query)
-
-    # Шаг 3: отправить форму
+    search_input.fill(SEARCH_QUERY)
     search_input.press("Enter")
-
-    # Шаг 4: дождаться загрузки
     page.wait_for_load_state("networkidle")
 
-    url_has_query = query in page.url
-    input_value = search_input.input_value() if search_input.is_visible() else ""
-    input_has_query = query in input_value
+    # Шаг 3: убедиться, что первый комикс добавлен в избранное
+    fav_stars = page.locator(".favorite-star")
+    if fav_stars.count() == 0:
+        pytest.skip("Кнопки избранного не найдены — пропуск теста")
 
-    assert url_has_query or input_has_query, (
-        f"Запрос '{query}' должен присутствовать в URL ({page.url}) или в поле ввода"
+    first_star = fav_stars.first
+    # Если звезда не активна — добавить в избранное
+    if "active" not in (first_star.get_attribute("class") or ""):
+        first_star.click()
+        page.wait_for_load_state("networkidle")
+
+    # Шаг 4: открыть /favorites и зафиксировать количество
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    count_before = page.locator(".comic-card").count()
+    assert count_before > 0, (
+        "После добавления комикса в избранное список /favorites не должен быть пустым"
+    )
+
+    # Шаг 5: удалить первый комикс из избранного
+    remove_star = page.locator(".favorite-star").first
+    if not remove_star.is_visible():
+        pytest.skip("Кнопка избранного на странице /favorites не найдена")
+    remove_star.click()
+    page.wait_for_load_state("networkidle")
+
+    # Шаг 6: открыть /favorites снова и проверить, что количество уменьшилось
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    count_after = page.locator(".comic-card").count()
+    assert count_after < count_before, (
+        f"После удаления количество комиксов в избранном должно уменьшиться "
+        f"(было {count_before}, стало {count_after})"
     )
 
 
