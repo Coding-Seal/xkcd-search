@@ -1,7 +1,7 @@
 BINARY_NAME=xkcd
 PORT=8090
 WEB_URL=http://localhost:8090
-PYTHON=venv/bin/python3
+PYTHON=$(shell test -d venv && echo venv/bin/python3 || echo python3)
 
 .PHONY: build
 build:

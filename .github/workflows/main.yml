@@ -59,12 +59,6 @@ jobs:
       - name: Build web
         run: make web
 
-      - name: Unit test
-        run: |
-          mkdir -p test/out
-          make test
-      - name: Integration tests
-        run: make integration
       - name: E2e tests
         run: |
           pip install requests
@@ -79,6 +73,12 @@ jobs:
           make e2e-playwright
         env:
           WEB_URL: http://localhost:8090
+      - name: Unit test
+        run: |
+          mkdir -p test/out
+          make test
+      - name: Integration tests
+        run: make integration
       - name: Lint test
         continue-on-error: true
         run: |
