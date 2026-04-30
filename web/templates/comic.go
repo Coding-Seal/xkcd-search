@@ -27,10 +27,11 @@ type Layout struct {
 	PageTitle string
 }
 type Comic struct {
-	ID       int
-	Title    string
-	ImgURL   string
-	Favorite bool
+	ID         int
+	Title      string
+	ImgURL     string
+	Favorite   bool
+	IsLoggedIn bool
 }
 
 type PicsParams struct {

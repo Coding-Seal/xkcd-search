@@ -63,7 +63,7 @@ func Favorites(c *rest.Client) httputil.ErrHandleFunc {
 			if err != nil {
 				return errors.Join(err, httputil.ErrInternal)
 			}
-			outComics = append(outComics, templates.Comic{ID: c.ID, ImgURL: c.ImgURL, Title: c.Title, Favorite: true})
+			outComics = append(outComics, templates.Comic{ID: c.ID, ImgURL: c.ImgURL, Title: c.Title, Favorite: true, IsLoggedIn: true})
 		}
 
 		return templates.Favorites(w, templates.FavoritesParams{

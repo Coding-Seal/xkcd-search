@@ -6,436 +6,433 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8090")
 
 VALID_USER = os.getenv("E2E_USER", "bob")
 VALID_PASS = os.getenv("E2E_PASS", "bob")
-SEARCH_QUERY = "apple"
 
 
 def _login(page: Page, username: str = VALID_USER, password: str = VALID_PASS) -> None:
-    """Вспомогательная функция: открыть /login, ввести учётные данные, отправить форму."""
+    """Helper: open /login, fill credentials, submit form, wait for redirect."""
     page.goto(BASE_URL + "/login")
-    page.locator("input[name='login'], input[type='text'], input[name='username']").first.fill(username)
-    page.locator("input[type='password'], input[name='password'], input[name='pswd']").first.fill(password)
-    page.locator("input[type='password'], input[name='password'], input[name='pswd']").first.press("Enter")
+    page.locator("input[name='login'], input[type='text']").first.fill(username)
+    page.locator("input[type='password'], input[name='pswd']").first.fill(password)
+    page.locator("input[type='password'], input[name='pswd']").first.press("Enter")
     page.wait_for_load_state("networkidle")
 
 
-# ---------------------------------------------------------------------------
-# Сценарий 1: Анонимный пользователь открывает главную страницу
-# Предусловия: веб-сервер запущен, пользователь не авторизован
-# ---------------------------------------------------------------------------
-def test_homepage_has_search_form(page: Page):
-    """
-    Шаг 1: Пользователь открывает главную страницу BASE_URL/.
-    Шаг 2: Страница загружается — заголовок (title) не пуст.
-    Шаг 3: На странице присутствует форма поиска с полем ввода.
-    Ожидаемый результат: форма и поле ввода видимы.
-    """
-    # Шаг 1: открыть главную страницу
-    page.goto(BASE_URL + "/")
-
-    # Шаг 2: проверить заголовок страницы
-    title = page.title()
-    assert title and len(title.strip()) > 0, "Заголовок страницы не должен быть пустым"
-
-    # Шаг 3: проверить наличие формы и поля ввода
-    expect(page.locator("form")).to_be_visible()
-    search_input = page.locator(
-        "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
-    ).first
-    expect(search_input).to_be_visible()
-
-
-# ---------------------------------------------------------------------------
-# Сценарий 2: Анонимный пользователь выполняет поиск
-# Предусловия: веб-сервер запущен, пользователь не авторизован
-# ---------------------------------------------------------------------------
-def test_anonymous_search_returns_results(page: Page):
-    """
-    Шаг 1: Пользователь открывает главную страницу.
-    Шаг 2: Вводит поисковый запрос в поле ввода.
-    Шаг 3: Нажимает Enter для отправки формы.
-    Шаг 4: Дожидается загрузки результатов.
-    Ожидаемый результат: на странице есть результаты поиска или сообщение об их отсутствии.
-    """
-    # Шаг 1: открыть главную страницу
-    page.goto(BASE_URL + "/")
-
-    # Шаг 2: ввести запрос
-    search_input = page.locator(
-        "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
-    ).first
-    search_input.fill(SEARCH_QUERY)
-
-    # Шаг 3: отправить форму
+def _search(page: Page, query: str) -> None:
+    """Helper: fill search input with query and submit."""
+    search_input = page.locator("input[name='query'], input[type='text']").first
+    search_input.fill(query)
     search_input.press("Enter")
-
-    # Шаг 4: дождаться загрузки
     page.wait_for_load_state("networkidle")
 
-    has_results = page.locator("img, .comic, .result, article").count() > 0
-    has_no_results_msg = (
-        "no result" in page.content().lower()
-        or "not found" in page.content().lower()
-        or "nothing" in page.content().lower()
-    )
-    assert has_results or has_no_results_msg, (
-        "После поиска ожидаются результаты или сообщение об их отсутствии"
-    )
+
+def _click_star_and_wait(page: Page, star_locator) -> None:
+    """Helper: click a favorite star and wait for the fetch request to complete."""
+    with page.expect_response(lambda r: "/favorite" in r.url):
+        star_locator.click()
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 3: Анонимный пользователь отправляет пустую форму поиска
-# Предусловия: веб-сервер запущен, пользователь не авторизован
+# Сценарий 4: Вход с неверным паролем → остаётся на /login
 # ---------------------------------------------------------------------------
-def test_empty_search_does_not_crash(page: Page):
+def test_login_wrong_password_stays_on_login(page: Page):
     """
-    Шаг 1: Пользователь открывает главную страницу.
-    Шаг 2: Отправляет форму поиска с пустым полем ввода.
-    Шаг 3: Дожидается загрузки страницы.
-    Ожидаемый результат: приложение не возвращает ошибку 5xx, страница загружается корректно.
+    Шаг 1: Открыть /login
+    Шаг 2: Ввести логин "bob", пароль "wrongpassword"
+    Шаг 3: Нажать Enter
+    Шаг 4: Дождаться загрузки
+    Ожидаемый результат: URL содержит /login; пользователь не перенаправлен
+    Постусловие: cookie Authorization не установлена
     """
-    # Шаг 1: открыть главную страницу
-    page.goto(BASE_URL + "/")
-
-    # Шаг 2: отправить пустую форму
-    form = page.locator("form").first
-    form.evaluate("f => f.submit()")
-
-    # Шаг 3: дождаться загрузки
-    page.wait_for_load_state("networkidle")
-
-    assert page.url is not None
-    title = page.title()
-    assert title is not None and "error" not in title.lower(), (
-        "Пустой поиск не должен приводить к странице ошибки"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Сценарий 4: Анонимный пользователь открывает страницу входа
-# Предусловия: веб-сервер запущен, пользователь не авторизован
-# ---------------------------------------------------------------------------
-def test_login_page_renders_credentials_fields(page: Page):
-    """
-    Шаг 1: Пользователь переходит на страницу /login.
-    Шаг 2: Страница загружается, форма входа видима.
-    Шаг 3: На форме присутствуют поле логина и поле пароля.
-    Ожидаемый результат: оба поля формы видимы и доступны для ввода.
-    """
-    # Шаг 1: открыть страницу входа
     page.goto(BASE_URL + "/login")
-
-    # Шаг 2: проверить форму
-    expect(page.locator("form")).to_be_visible()
-
-    # Шаг 3: проверить поля формы
-    login_field = page.locator(
-        "input[name='login'], input[type='text'], input[name='username']"
-    ).first
-    password_field = page.locator(
-        "input[type='password'], input[name='password'], input[name='pswd']"
-    ).first
-
-    expect(login_field).to_be_visible()
-    expect(password_field).to_be_visible()
-
-
-# ---------------------------------------------------------------------------
-# Сценарий 5: Пользователь вводит неверные учётные данные
-# Предусловия: веб-сервер запущен, пользователь не авторизован
-# ---------------------------------------------------------------------------
-def test_invalid_login_shows_error_or_stays_on_login(page: Page):
-    """
-    Шаг 1: Пользователь открывает страницу /login.
-    Шаг 2: Вводит несуществующий логин и неверный пароль.
-    Шаг 3: Нажимает Enter для отправки формы.
-    Шаг 4: Дожидается загрузки.
-    Ожидаемый результат: остаётся на странице /login или видит сообщение об ошибке.
-    """
-    # Шаг 1: открыть страницу входа
-    page.goto(BASE_URL + "/login")
-
-    login_field = page.locator(
-        "input[name='login'], input[type='text'], input[name='username']"
-    ).first
-    password_field = page.locator(
-        "input[type='password'], input[name='password'], input[name='pswd']"
-    ).first
-
-    # Шаг 2: ввести неверные данные
-    login_field.fill("no_such_user_xyzzy")
-    password_field.fill("wrong_password_xyzzy")
-
-    # Шаг 3: отправить форму
-    password_field.press("Enter")
-
-    # Шаг 4: дождаться загрузки
+    page.locator("input[name='login'], input[type='text']").first.fill("bob")
+    page.locator("input[type='password'], input[name='pswd']").first.fill("wrongpassword")
+    page.locator("input[type='password'], input[name='pswd']").first.press("Enter")
     page.wait_for_load_state("networkidle")
 
-    stayed_on_login = "/login" in page.url
-    has_error_text = any(
-        kw in page.content().lower()
-        for kw in ("error", "invalid", "incorrect", "unauthorized", "wrong", "failed")
+    assert "/login" in page.url, (
+        f"После неверного пароля ожидается остаться на /login, но URL: {page.url}"
     )
-    assert stayed_on_login or has_error_text, (
-        "После неверных учётных данных ожидается остаться на /login или увидеть ошибку"
+
+    cookies = {c["name"]: c for c in page.context.cookies()}
+    assert "Authorization" not in cookies, (
+        "Cookie Authorization не должна быть установлена после неверного пароля"
     )
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 6: Пользователь успешно входит в систему
-# Предусловия: веб-сервер запущен, пользователь bob/bob существует в БД
+# Сценарий 5: Неверный пароль → верный пароль → поиск комикса
 # ---------------------------------------------------------------------------
-def test_valid_login_redirects_to_home(page: Page):
+def test_login_wrong_then_correct_password_and_search(page: Page):
     """
-    Шаг 1: Пользователь открывает страницу /login.
-    Шаг 2: Вводит корректный логин и пароль (bob/bob).
-    Шаг 3: Нажимает Enter для отправки формы.
-    Шаг 4: Дожидается загрузки.
-    Ожидаемый результат: браузер перенаправляется с /login на другую страницу.
+    Шаг 1: Открыть /login
+    Шаг 2: Ввести bob/wrongpassword → Enter
+    Шаг 3: Убедиться что остались на /login
+    Шаг 4: Ввести bob/bob → Enter
+    Шаг 5: Дождаться редиректа на главную
+    Шаг 6: Ввести "apple" → Enter
+    Шаг 7: Дождаться результатов
+    Ожидаемый результат: после второй попытки URL не содержит /login; на главной отображаются комиксы
+    Постусловие: пользователь авторизован; cookie Authorization установлена
     """
-    # Шаги 1–4: логин через вспомогательную функцию
-    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/login")
+    page.locator("input[name='login'], input[type='text']").first.fill("bob")
+    page.locator("input[type='password'], input[name='pswd']").first.fill("wrongpassword")
+    page.locator("input[type='password'], input[name='pswd']").first.press("Enter")
+    page.wait_for_load_state("networkidle")
+
+    assert "/login" in page.url, "После первой неверной попытки ожидается остаться на /login"
+
+    page.locator("input[name='login'], input[type='text']").first.fill("bob")
+    page.locator("input[type='password'], input[name='pswd']").first.fill(VALID_PASS)
+    page.locator("input[type='password'], input[name='pswd']").first.press("Enter")
+    page.wait_for_load_state("networkidle")
 
     assert "/login" not in page.url, (
-        f"После успешного входа ожидается редирект с /login, но URL: {page.url}"
+        f"После верного пароля ожидается редирект, но URL: {page.url}"
     )
 
+    _search(page, "apple")
+
+    comics = page.locator(".comic-card").count()
+    assert comics > 0, "После входа поиск 'apple' должен вернуть комиксы"
+
 
 # ---------------------------------------------------------------------------
-# Сценарий 7: Авторизованный пользователь выполняет поиск и видит кнопку «Избранное»
-# Предусловия: пользователь bob/bob вошёл в систему, индекс заполнен
+# Сценарий 6: Анонимный пользователь ищет комикс — кнопок избранного нет
 # ---------------------------------------------------------------------------
-def test_logged_in_user_search_shows_favorite_button(page: Page):
+def test_anonymous_search_no_favorite_buttons(page: Page):
     """
-    Шаг 1: Пользователь входит в систему (bob/bob).
-    Шаг 2: Переходит на главную страницу.
-    Шаг 3: Вводит поисковый запрос и нажимает Enter.
-    Шаг 4: Дожидается загрузки результатов.
-    Ожидаемый результат: среди результатов присутствует кнопка добавления в избранное.
+    Шаг 1: Открыть /
+    Шаг 2: Убедиться что присутствует форма с текстовым полем
+    Шаг 3: Ввести "apple" → Enter
+    Шаг 4: Дождаться загрузки результатов
+    Ожидаемый результат: страница содержит элементы комиксов; кнопок .favorite-star нет
+    Постусловие: состояние системы не изменилось
     """
-    # Шаг 1: войти в систему
-    _login(page, VALID_USER, VALID_PASS)
-
-    # Шаг 2: открыть главную страницу
     page.goto(BASE_URL + "/")
+    expect(page.locator("form")).to_be_visible()
 
-    # Шаг 3: ввести запрос и отправить
-    search_input = page.locator(
-        "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
-    ).first
-    search_input.fill(SEARCH_QUERY)
-    search_input.press("Enter")
+    _search(page, "apple")
 
-    # Шаг 4: дождаться загрузки
-    page.wait_for_load_state("networkidle")
+    comics = page.locator(".comic-card").count()
+    assert comics > 0, "Ожидаются результаты поиска"
 
-    result_count = page.locator("img, .comic, .result, article").count()
-    if result_count == 0:
-        pytest.skip("Нет результатов поиска — пропуск проверки кнопки избранного")
-
-    fav_button = page.locator(
-        "button[class*='fav'], button[class*='favorite'], a[href*='fav'], "
-        "button[aria-label*='favorite'], button[title*='favorite'], .favorite-btn, "
-        "form[action*='fav'] button, input[value*='fav'], .favorite-star"
-    )
-    assert fav_button.count() > 0, (
-        "Ожидается кнопка избранного в результатах поиска для авторизованного пользователя"
+    fav_stars = page.locator(".favorite-star")
+    assert fav_stars.count() == 0, (
+        "Анонимный пользователь не должен видеть кнопки .favorite-star"
     )
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 8: Авторизованный пользователь открывает страницу избранного
-# Предусловия: пользователь bob/bob вошёл в систему
+# Сценарий 7: Несуществующий запрос, затем реальный — получены результаты
 # ---------------------------------------------------------------------------
-def test_logged_in_user_can_view_favorites_page(page: Page):
+def test_nonexistent_query_then_real_returns_results(page: Page):
     """
-    Шаг 1: Пользователь входит в систему (bob/bob).
-    Шаг 2: Переходит на страницу /favorites.
-    Шаг 3: Страница загружается без серверной ошибки.
-    Ожидаемый результат: HTTP-статус < 500, страница содержит контент.
+    Шаг 1: Открыть /
+    Шаг 2: Ввести "xyzzy_no_such_comic_ever" → Enter
+    Шаг 3: Убедиться что список пуст или нет результатов; нет 5xx ошибки
+    Шаг 4: Ввести "apple" → Enter
+    Шаг 5: Дождаться загрузки результатов
+    Ожидаемый результат: второй поиск возвращает комиксы; оба запроса обработаны корректно
+    Постусловие: состояние системы не изменилось
     """
-    # Шаг 1: войти в систему
-    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/")
+    _search(page, "xyzzy_no_such_comic_ever")
 
-    # Шаг 2: открыть страницу избранного
-    response = page.goto(BASE_URL + "/favorites")
-
-    # Шаг 3: проверить статус и содержимое
-    assert response is not None
-    assert response.status < 500, (
-        f"Страница избранного вернула серверную ошибку {response.status}"
-    )
     content = page.content().lower()
-    assert len(content) > 100, "Страница избранного почти пуста"
+    assert "500" not in content and "internal server error" not in content, (
+        "Несуществующий запрос не должен вызывать 5xx ошибку"
+    )
+    assert page.locator(".comic-card").count() == 0, (
+        "Несуществующий запрос должен вернуть пустой список"
+    )
+
+    _search(page, "apple")
+
+    comics = page.locator(".comic-card").count()
+    assert comics > 0, "После реального запроса 'apple' ожидаются комиксы"
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 9: Авторизованный пользователь добавляет комикс в избранное
-# Предусловия: пользователь bob/bob вошёл в систему, индекс заполнен
+# Сценарий 8: Авторизованный пользователь видит кнопки избранного, анонимный — нет
 # ---------------------------------------------------------------------------
-def test_logged_in_user_add_to_favorites_appears_on_favorites_page(page: Page):
+def test_auth_user_sees_favorites_anon_does_not(page: Page):
     """
-    Шаг 1: Пользователь входит в систему (bob/bob).
-    Шаг 2: Выполняет поиск по запросу "apple".
-    Шаг 3: Нажимает кнопку «Избранное» у первого результата.
-    Шаг 4: Переходит на страницу /favorites.
-    Ожидаемый результат: страница /favorites содержит добавленный элемент или сообщение о состоянии.
+    Шаг 1: Открыть /, ввести "apple" → Enter
+    Шаг 2: Убедиться что кнопок избранного нет (пользователь анонимный)
+    Шаг 3: Открыть /login, ввести bob/bob → Enter, дождаться редиректа
+    Шаг 4: Перейти на /, ввести "apple" → Enter
+    Шаг 5: Дождаться результатов
+    Ожидаемый результат: после входа у каждого комикса видна кнопка .favorite-star
+    Постусловие: пользователь авторизован
     """
-    # Шаг 1: войти в систему
+    page.goto(BASE_URL + "/")
+    _search(page, "apple")
+
+    assert page.locator(".favorite-star").count() == 0, (
+        "Анонимный пользователь не должен видеть кнопки .favorite-star"
+    )
+
+    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/")
+    _search(page, "apple")
+
+    fav_stars = page.locator(".favorite-star")
+    assert fav_stars.count() > 0, (
+        "Авторизованный пользователь должен видеть кнопки .favorite-star в результатах поиска"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Сценарий 9: Войти, убедиться в пустом /favorites, найти комикс, добавить → на /favorites
+# ---------------------------------------------------------------------------
+def test_login_empty_favorites_add_comic_appears(page: Page):
+    """
+    Шаг 1: Открыть /login, ввести bob/bob → Enter
+    Шаг 2: Открыть /favorites — убедиться что список пуст
+    Шаг 3: Перейти на /, ввести "apple" → Enter
+    Шаг 4: Запомнить title первого комикса
+    Шаг 5: Нажать кнопку избранного у первого комикса
+    Шаг 6: Открыть /favorites
+    Ожидаемый результат: на /favorites отображается именно тот комикс из шага 4
+    Постусловие: cookie Favorites содержит ID добавленного комикса
+    """
     _login(page, VALID_USER, VALID_PASS)
 
-    # Шаг 2: выполнить поиск
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    assert page.locator(".comic-card").count() == 0, (
+        "Список избранного должен быть пустым в начале теста"
+    )
+
     page.goto(BASE_URL + "/")
-    search_input = page.locator(
-        "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
-    ).first
-    search_input.fill(SEARCH_QUERY)
-    search_input.press("Enter")
-    page.wait_for_load_state("networkidle")
+    _search(page, "apple")
 
-    # Шаг 3: нажать кнопку избранного у первого результата
-    fav_button = page.locator(
-        "button[class*='fav'], button[class*='favorite'], "
-        "form[action*='fav'] button, input[value*='fav'], "
-        "button[aria-label*='favorite'], .favorite-btn, .favorite-star"
-    ).first
+    first_card = page.locator(".comic-card").first
+    title = first_card.locator("h3").inner_text()
 
-    if not fav_button.is_visible():
-        pytest.skip("Кнопка избранного не найдена в результатах поиска — пропуск")
+    first_star = page.locator(".favorite-star").first
+    assert first_star.is_visible(), "Кнопка .favorite-star должна быть видна"
+    _click_star_and_wait(page, first_star)
 
-    fav_button.click()
-    page.wait_for_load_state("networkidle")
-
-    # Шаг 4: перейти на /favorites и проверить содержимое
     page.goto(BASE_URL + "/favorites")
     page.wait_for_load_state("networkidle")
 
-    has_items = page.locator("img, .comic, .result, article, li").count() > 0
-    has_empty_msg = (
-        "no favorites" in page.content().lower()
-        or "empty" in page.content().lower()
-    )
-    assert has_items or has_empty_msg, (
-        "После добавления в избранное страница /favorites должна показывать элемент или пустое состояние"
+    assert title in page.content(), (
+        f"Ожидается комикс '{title}' на странице /favorites"
     )
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 10: Пользователь кликает по ссылке «Home» в навигации
-# Предусловия: веб-сервер запущен
+# Сценарий 10: Добавить два комикса, удалить один — остался только нужный
 # ---------------------------------------------------------------------------
-def test_navbar_home_link_navigates_to_root(page: Page):
+def test_add_two_remove_first_only_second_remains(page: Page):
     """
-    Шаг 1: Пользователь открывает страницу /login.
-    Шаг 2: Находит ссылку «Home» в навигационном меню.
-    Шаг 3: Кликает по ссылке.
-    Шаг 4: Дожидается загрузки.
-    Ожидаемый результат: браузер переходит на корневой URL (/).
+    Шаг 1: Открыть /login, ввести bob/bob → Enter
+    Шаг 2: Перейти на /, ввести "apple" → Enter
+    Шаг 3: Запомнить title первого и второго комикса
+    Шаг 4: Нажать кнопку избранного у первого комикса
+    Шаг 5: Нажать кнопку избранного у второго комикса
+    Шаг 6: Открыть /favorites — убедиться что оба присутствуют
+    Шаг 7: Нажать кнопку избранного у первого комикса (удаление)
+    Шаг 8: Открыть /favorites
+    Ожидаемый результат: на /favorites только второй комикс; первый отсутствует
+    Постусловие: cookie Favorites содержит только ID второго комикса
     """
-    # Шаг 1: открыть страницу входа
-    page.goto(BASE_URL + "/login")
+    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/")
+    _search(page, "apple")
 
-    # Шаг 2–3: найти и кликнуть ссылку на главную
-    home_link = page.locator("a[href='/'], a[href=''], nav a, header a").first
-    home_link.click()
+    cards = page.locator(".comic-card")
+    assert cards.count() >= 2, "Нужно минимум 2 комикса в результатах для этого теста"
 
-    # Шаг 4: дождаться загрузки
+    title1 = cards.nth(0).locator("h3").inner_text()
+    title2 = cards.nth(1).locator("h3").inner_text()
+
+    _click_star_and_wait(page, page.locator(".favorite-star").nth(0))
+    _click_star_and_wait(page, page.locator(".favorite-star").nth(1))
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    content = page.content()
+    assert title1 in content, f"Первый комикс '{title1}' должен быть в избранном"
+    assert title2 in content, f"Второй комикс '{title2}' должен быть в избранном"
+
+    _click_star_and_wait(page, page.locator(".favorite-star").first)
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    content_after = page.content()
+    assert title2 in content_after, f"Второй комикс '{title2}' должен остаться в избранном"
+    assert title1 not in content_after, f"Первый комикс '{title1}' должен быть удалён из избранного"
+
+
+# ---------------------------------------------------------------------------
+# Сценарий 11: Добавить комикс в избранное, удалить — список снова пустой
+# ---------------------------------------------------------------------------
+def test_add_and_remove_favorite_list_becomes_empty(page: Page):
+    """
+    Шаг 1: Открыть /login, ввести bob/bob → Enter
+    Шаг 2: Перейти на /, ввести "apple" → Enter
+    Шаг 3: Нажать кнопку избранного у первого комикса (добавление)
+    Шаг 4: Открыть /favorites — убедиться что комикс присутствует
+    Шаг 5: Нажать кнопку избранного у того же комикса (удаление)
+    Шаг 6: Открыть /favorites
+    Ожидаемый результат: список избранного пуст
+    Постусловие: cookie Favorites содержит пустой массив
+    """
+    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/")
+    _search(page, "apple")
+
+    first_star = page.locator(".favorite-star").first
+    assert first_star.is_visible(), "Кнопка .favorite-star должна быть видна"
+    _click_star_and_wait(page, first_star)
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    assert page.locator(".comic-card").count() > 0, "Комикс должен появиться в избранном"
+
+    remove_star = page.locator(".favorite-star").first
+    assert remove_star.is_visible(), "Кнопка удаления из избранного должна быть видна"
+    _click_star_and_wait(page, remove_star)
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    count = page.locator(".comic-card").count()
+    assert count == 0, f"Список избранного должен быть пустым после удаления, но найдено {count} элементов"
+
+
+# ---------------------------------------------------------------------------
+# Сценарий 12: Добавить комикс, выполнить новый поиск — избранное сохранилось
+# ---------------------------------------------------------------------------
+def test_add_favorite_new_search_favorite_persists(page: Page):
+    """
+    Шаг 1: Открыть /login, ввести bob/bob → Enter
+    Шаг 2: Перейти на /, ввести "apple" → Enter
+    Шаг 3: Нажать кнопку избранного у первого комикса (добавление)
+    Шаг 4: Ввести "linux" → Enter
+    Шаг 5: Дождаться новых результатов
+    Шаг 6: Открыть /favorites
+    Ожидаемый результат: комикс из шага 3 всё ещё присутствует; новый поиск не сбросил избранное
+    Постусловие: cookie Favorites сохранена между поисками
+    """
+    _login(page, VALID_USER, VALID_PASS)
+    page.goto(BASE_URL + "/")
+    _search(page, "apple")
+
+    first_card = page.locator(".comic-card").first
+    title = first_card.locator("h3").inner_text()
+
+    first_star = page.locator(".favorite-star").first
+    assert first_star.is_visible(), "Кнопка .favorite-star должна быть видна"
+    _click_star_and_wait(page, first_star)
+
+    _search(page, "linux")
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    assert title in page.content(), (
+        f"Комикс '{title}' должен сохраниться в избранном после нового поиска"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Сценарий 13: Анонимный пользователь открывает /favorites — нет чужих данных
+# ---------------------------------------------------------------------------
+def test_anonymous_favorites_page_no_foreign_data(page: Page):
+    """
+    Шаг 1: Открыть /favorites напрямую без авторизации
+    Шаг 2: Дождаться загрузки страницы
+    Ожидаемый результат: статус < 500; список пуст или редирект на /login; чужих данных нет
+    Постусловие: состояние системы не изменилось
+    """
+    response = page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+
+    assert response is not None
+    assert response.status < 500, (
+        f"Анонимный доступ к /favorites вернул ошибку сервера: {response.status}"
+    )
+
+    is_login_redirect = "/login" in page.url
+    is_empty_list = page.locator(".comic-card").count() == 0
+    assert is_login_redirect or is_empty_list, (
+        "Анонимный /favorites должен показывать пустой список или перенаправить на /login"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Сценарий 14: Войти, добавить комикс, перейти на главную через navbar → избранное сохранилось
+# ---------------------------------------------------------------------------
+def test_navbar_home_navigation_favorite_persists(page: Page):
+    """
+    Шаг 1: Открыть /login, ввести bob/bob → Enter
+    Шаг 2: Ввести "apple" → Enter; добавить первый комикс в избранное
+    Шаг 3: Открыть /favorites — убедиться что комикс есть
+    Шаг 4: Кликнуть ссылку Home в navbar
+    Шаг 5: Дождаться загрузки главной страницы
+    Шаг 6: Открыть /favorites снова
+    Ожидаемый результат: после навигации через navbar комикс всё ещё в избранном
+    Постусловие: URL равен BASE_URL/; cookie Favorites не сброшена
+    """
+    _login(page, VALID_USER, VALID_PASS)
+    _search(page, "apple")
+
+    first_card = page.locator(".comic-card").first
+    title = first_card.locator("h3").inner_text()
+
+    first_star = page.locator(".favorite-star").first
+    assert first_star.is_visible(), "Кнопка .favorite-star должна быть видна"
+    _click_star_and_wait(page, first_star)
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    assert title in page.content(), "Комикс должен быть в избранном до навигации"
+
+    page.locator("nav a[href='/']").click()
     page.wait_for_load_state("networkidle")
 
     root = BASE_URL.rstrip("/")
     assert page.url.rstrip("/") == root or page.url == root + "/", (
-        f"После клика на Home ожидается корневой URL, но URL: {page.url}"
+        f"После клика Home ожидается корневой URL, но URL: {page.url}"
+    )
+
+    page.goto(BASE_URL + "/favorites")
+    page.wait_for_load_state("networkidle")
+    assert title in page.content(), (
+        f"Комикс '{title}' должен сохраниться в избранном после навигации через navbar"
     )
 
 
 # ---------------------------------------------------------------------------
-# Сценарий 13: Пользователь добавляет комикс в избранное, затем убирает его
-# Предусловия: пользователь bob/bob существует в БД, индекс заполнен
+# Сценарий 15: Поисковый запрос отражается в URL после submit, следующий поиск обновляет его
 # ---------------------------------------------------------------------------
-def test_add_and_remove_favorite_disappears_from_favorites(page: Page):
+def test_search_query_reflects_in_url_or_input(page: Page):
     """
-    Шаг 1: Пользователь входит в систему (bob/bob).
-    Шаг 2: Выполняет поиск "apple", ожидает результаты.
-    Шаг 3: Убеждается, что первый комикс добавлен в избранное (кликает если нет).
-    Шаг 4: Открывает /favorites — фиксирует количество комиксов.
-    Шаг 5: Кликает кнопку избранного у первого комикса — удаляет из избранного.
-    Шаг 6: Открывает /favorites снова — проверяет, что количество уменьшилось.
-    Ожидаемый результат: комикс исчез со страницы /favorites после удаления.
+    Шаг 1: Открыть /
+    Шаг 2: Ввести "apple" → Enter
+    Шаг 3: Проверить что "apple" присутствует в URL или в поле ввода
+    Шаг 4: Ввести "linux" → Enter
+    Шаг 5: Проверить что URL или поле ввода обновились на "linux"
+    Ожидаемый результат: каждый поиск отражается в состоянии страницы
+    Постусловие: состояние системы не изменилось
     """
-    # Шаг 1: войти в систему
-    _login(page, VALID_USER, VALID_PASS)
-
-    # Шаг 2: выполнить поиск
     page.goto(BASE_URL + "/")
-    search_input = page.locator(
-        "input[type='text'], input[name='query'], input[name='search'], input[placeholder*='earch']"
-    ).first
-    search_input.fill(SEARCH_QUERY)
-    search_input.press("Enter")
-    page.wait_for_load_state("networkidle")
+    _search(page, "apple")
 
-    # Шаг 3: убедиться, что первый комикс добавлен в избранное
-    fav_stars = page.locator(".favorite-star")
-    if fav_stars.count() == 0:
-        pytest.skip("Кнопки избранного не найдены — пропуск теста")
-
-    first_star = fav_stars.first
-    # Если звезда не активна — добавить в избранное
-    if "active" not in (first_star.get_attribute("class") or ""):
-        first_star.click()
-        page.wait_for_load_state("networkidle")
-
-    # Шаг 4: открыть /favorites и зафиксировать количество
-    page.goto(BASE_URL + "/favorites")
-    page.wait_for_load_state("networkidle")
-    count_before = page.locator(".comic-card").count()
-    assert count_before > 0, (
-        "После добавления комикса в избранное список /favorites не должен быть пустым"
+    url_has_apple = "apple" in page.url
+    input_value = page.locator("input[name='query']").first.input_value()
+    input_has_apple = input_value == "apple"
+    assert url_has_apple or input_has_apple, (
+        f"После поиска 'apple' ожидается 'apple' в URL или поле ввода. URL: {page.url}, input: '{input_value}'"
     )
 
-    # Шаг 5: удалить первый комикс из избранного
-    remove_star = page.locator(".favorite-star").first
-    if not remove_star.is_visible():
-        pytest.skip("Кнопка избранного на странице /favorites не найдена")
-    remove_star.click()
-    page.wait_for_load_state("networkidle")
+    _search(page, "linux")
 
-    # Шаг 6: открыть /favorites снова и проверить, что количество уменьшилось
-    page.goto(BASE_URL + "/favorites")
-    page.wait_for_load_state("networkidle")
-    count_after = page.locator(".comic-card").count()
-    assert count_after < count_before, (
-        f"После удаления количество комиксов в избранном должно уменьшиться "
-        f"(было {count_before}, стало {count_after})"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Сценарий 12: Анонимный пользователь обращается к /favorites
-# Предусловия: веб-сервер запущен, пользователь не авторизован
-# ---------------------------------------------------------------------------
-def test_unauthenticated_favorites_page_is_accessible(page: Page):
-    """
-    Шаг 1: Пользователь (не авторизованный) напрямую открывает /favorites.
-    Шаг 2: Дожидается загрузки страницы.
-    Ожидаемый результат: статус < 500; отображается пустое состояние,
-    ссылка на вход или перенаправление на /login — без серверной ошибки.
-    """
-    # Шаг 1: открыть /favorites без авторизации
-    response = page.goto(BASE_URL + "/favorites")
-
-    # Шаг 2: проверить статус и содержимое
-    assert response is not None
-    assert response.status < 500, (
-        f"Анонимный доступ к /favorites вернул серверную ошибку: {response.status}"
-    )
-
-    content = page.content().lower()
-    is_login_page = "/login" in page.url
-    has_login_link = "login" in content
-    has_empty_state = (
-        "no favorites" in content or "empty" in content or "sign in" in content
-    )
-    assert is_login_page or has_login_link or has_empty_state or len(content) > 100, (
-        "Неавторизованный /favorites должен показывать пустое состояние, ссылку на вход или редирект"
+    url_has_linux = "linux" in page.url
+    input_value = page.locator("input[name='query']").first.input_value()
+    input_has_linux = input_value == "linux"
+    assert url_has_linux or input_has_linux, (
+        f"После поиска 'linux' ожидается 'linux' в URL или поле ввода. URL: {page.url}, input: '{input_value}'"
     )

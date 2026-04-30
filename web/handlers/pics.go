@@ -29,13 +29,16 @@ func Pics(c *rest.Client) httputil.ErrHandleFunc {
 				return errors.Join(err, httputil.ErrBadRequest)
 			}
 		}
+
+		_, isLoggedIn := r.Cookie("Authorization")
 		outComics := make([]templates.Comic, 0, len(comics))
 		for _, c := range comics {
 			outComics = append(outComics, templates.Comic{
-				ID:       c.ID,
-				ImgURL:   c.ImgURL,
-				Title:    c.Title,
-				Favorite: slices.Contains(favIDs, c.ID),
+				ID:         c.ID,
+				ImgURL:     c.ImgURL,
+				Title:      c.Title,
+				Favorite:   slices.Contains(favIDs, c.ID),
+				IsLoggedIn: isLoggedIn == nil,
 			})
 		}
 
