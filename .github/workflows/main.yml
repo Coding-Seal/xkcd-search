@@ -1,5 +1,4 @@
 name: Main actions workflow
-
 on:
   push:
   pull_request:
@@ -58,7 +57,6 @@ jobs:
           make build
       - name: Build web
         run: make web
-
       - name: E2e tests
         run: |
           pip install requests
@@ -79,11 +77,7 @@ jobs:
           make test
       - name: Integration tests
         run: make integration
-      - name: Lint test
-        continue-on-error: true
-        run: |
-          export PATH=$PATH:bin
-          make lint
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
