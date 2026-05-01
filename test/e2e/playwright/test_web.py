@@ -137,7 +137,7 @@ def test_nonexistent_query_then_real_returns_results(page: Page):
     Постусловие: состояние системы не изменилось
     """
     page.goto(BASE_URL + "/")
-    _search(page, "xyzzy_no_such_comic_ever")
+    _search(page, "xyzzyqqqwwwzzz")
 
     content = page.content().lower()
     assert "500" not in content and "internal server error" not in content, (
